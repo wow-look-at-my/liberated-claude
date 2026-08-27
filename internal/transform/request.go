@@ -47,7 +47,7 @@ func AnthropicToOpenAI(req *wire.MessagesRequest, m *config.Model) (*wire.OARequ
 		if systemText != "" {
 			out.Messages = append(out.Messages, wire.OAMessage{
 				Role:    "system",
-				Content: json.RawMessage([]byte(fmt.Sprintf("%q", systemText))),
+				Content: jsonString(systemText),
 			})
 		}
 	}
@@ -77,7 +77,7 @@ func AnthropicToOpenAI(req *wire.MessagesRequest, m *config.Model) (*wire.OARequ
 			if text != "" {
 				out.Messages = append(out.Messages, wire.OAMessage{
 					Role:    "system",
-					Content: json.RawMessage([]byte(fmt.Sprintf("%q", text))),
+					Content: jsonString(text),
 				})
 			}
 		} else {
@@ -98,6 +98,15 @@ func AnthropicToOpenAI(req *wire.MessagesRequest, m *config.Model) (*wire.OARequ
 	}
 
 	return out, nil
+}
+
+// jsonString encodes s as a JSON string. Go's %q verb is not a substitute: it
+// escapes control bytes as \xNN, which JSON has no such escape for, so a tool
+// result carrying one produced a body no decoder would accept.
+func jsonString(s string) json.RawMessage {
+	// json.Marshal of a string cannot fail; any input is representable.
+	b, _ := json.Marshal(s)
+	return json.RawMessage(b)
 }
 
 // reqSystemText extracts text from the system prompt, handling both string and array forms.
@@ -253,7 +262,7 @@ func reqUserMessages(msg wire.Message, mode config.CacheMode) ([]wire.OAMessage,
 			result = append(result, wire.OAMessage{
 				Role:       "tool",
 				ToolCallID: block.ToolUseID,
-				Content:    json.RawMessage([]byte(fmt.Sprintf("%q", toolResultText))),
+				Content:    jsonString(toolResultText),
 			})
 		}
 	}

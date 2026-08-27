@@ -42,8 +42,7 @@ var bareTier = regexp.MustCompile(`^(sonnet|opus|haiku|fable|mythos)(-[\d.]+)?$`
 // anthropicHints admit an ID when none of ForeignTokens matched.
 var anthropicHints = append([]string{"claude"}, append(append([]string{}, Tiers...), "anthropic")...)
 
-// prefix marks an encoded ID. It contains "claude", which satisfies
-// anthropicHints, and is itself free of any foreign token.
+// prefix marks an encoded ID: "claude-lc-" (passes anthropicHints, no foreign tokens).
 const prefix = "claude-lc-"
 
 // Accepts reports whether Claude Desktop's model-ID screen admits id.
@@ -75,12 +74,8 @@ func IsTier(s string) bool {
 	return false
 }
 
-// Encode returns an ID for upstream that Desktop will accept.
-//
-// An upstream ID that already passes the screen is returned unchanged, so
-// genuine Anthropic models keep their real names and stay recognizable in the
-// picker. Anything else is hex-encoded behind prefix: hex has no letters beyond
-// a-f, so no foreign token can survive the encoding and reappear in the result.
+// Encode returns an ID for upstream that Desktop accepts. Pass-through if
+// accepted; otherwise hex-encode (no foreign tokens survive the encoding).
 func Encode(upstream string) string {
 	if Accepts(upstream) {
 		return upstream
@@ -97,12 +92,7 @@ func Encode(upstream string) string {
 	return b.String()
 }
 
-// Decode reverses Encode, returning the upstream model ID.
-//
-// An ID that does not carry prefix was passed through by Encode and is returned
-// unchanged. A malformed encoding is likewise returned unchanged: the caller
-// looks the result up in its model table, so an unresolvable ID surfaces there
-// as an unknown model rather than as a silent mangling here.
+// Decode reverses Encode. IDs without prefix or malformed encodings return unchanged.
 func Decode(id string) string {
 	body, ok := strings.CutPrefix(id, prefix)
 	if !ok {
@@ -135,15 +125,10 @@ func unhex(c byte) (byte, bool) {
 	return 0, false
 }
 
-// oneMSuffix matches the "[1m]" marker Desktop appends to name the
-// 1M-context variant of a model. Transcribed from the app's Vs():
-//
-//	let t = e.match(/^(.+?)\[1m\]$/i);
+// oneMSuffix matches the "[1m]" marker for 1M-context model names (from app's Vs()).
 var oneMSuffix = regexp.MustCompile(`(?i)^(.+?)\[1m\]$`)
 
-// SplitOneM strips a trailing "[1m]" marker, reporting whether one was present.
-// Requests for a model's 1M variant may arrive with the marker attached, so
-// every incoming model ID is run through this before being resolved.
+// SplitOneM strips the trailing "[1m]" marker from model IDs.
 func SplitOneM(id string) (base string, oneM bool) {
 	m := oneMSuffix.FindStringSubmatch(id)
 	if m == nil {

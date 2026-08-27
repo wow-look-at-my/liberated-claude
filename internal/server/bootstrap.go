@@ -28,9 +28,7 @@ type modelEntry struct {
 	PreferOneM          bool   `json:"prefer1m,omitempty"`
 }
 
-// handleBootstrap serves the config overlay Claude Desktop fetches at launch
-// from its bootstrapUrl setting. Values here override the app's local settings
-// and become read-only in its UI.
+// handleBootstrap serves the config overlay (overrides app settings, read-only).
 func (s *Server) handleBootstrap(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.bootstrapConfig())
 }
@@ -43,11 +41,9 @@ func (s *Server) bootstrapConfig() map[string]any {
 		"inferenceCredentialKind": "static",
 		"inferenceGatewayBaseUrl": s.cfg.Server.PublicURL,
 		"inferenceGatewayApiKey":  s.cfg.Server.APIKey,
-		// Desktop sends the key as x-api-key under this scheme, which is what
-		// authenticate() checks first.
+		// Desktop sends key as x-api-key (checked first by authenticate()).
 		"inferenceGatewayAuthScheme": "x-api-key",
-		// The model list is served from /v1/models, so discovery stays on and
-		// inferenceModels below acts as the fallback if discovery cannot run.
+		// Model list from /v1/models; inferenceModels is fallback if discovery fails.
 		"modelDiscoveryEnabled": true,
 		"inferenceModels":       s.modelEntries(),
 	}

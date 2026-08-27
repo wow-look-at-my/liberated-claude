@@ -395,8 +395,7 @@ func TestStreamOpenAIToAnthropicCacheAccountingStreaming(t *testing.T) {
 
 	output := dst.String()
 
-	// Verify cache accounting in message_delta.
-	// Input tokens should be 250 - 100 = 150.
+	// Cache accounting in message_delta (input = 250 - 100 cached = 150).
 	assert.Contains(t, output, `"input_tokens":150`, "input_tokens should exclude cached tokens")
 	assert.Contains(t, output, `"cache_read_input_tokens":100`, "cache_read_input_tokens should be set")
 	assert.Contains(t, output, `"cache_creation_input_tokens":50`, "cache_creation_input_tokens should be set")

@@ -11,26 +11,18 @@ import (
 	"github.com/wow-look-at-my/liberated-claude/internal/alias"
 )
 
-// OneMThreshold is the input-token count at or above which Claude Desktop
-// treats a model as 1M-context. Taken from the app's discovery mapping:
-//
-//	let l = (e, t) => typeof e == "boolean" ? e : typeof t == "number" && t >= 1e6;
-//
-// applied as l(model.supports_1m, model.max_input_tokens).
+// OneMThreshold is where Claude Desktop treats a model as 1M-context: max_input_tokens >= 1e6.
 const OneMThreshold = 1_000_000
 
 // CacheMode says how a provider expects prompt caching to be requested.
 type CacheMode string
 
 const (
-	// CacheExplicit means the provider honors Anthropic cache_control blocks,
-	// which are forwarded untouched.
+	// CacheExplicit: provider honors cache_control blocks (forwarded untouched).
 	CacheExplicit CacheMode = "explicit"
-	// CacheImplicit means the provider caches long prefixes automatically. No
-	// cache directive is sent; cache hits are read back from the usage block.
+	// CacheImplicit: provider caches prefixes automatically.
 	CacheImplicit CacheMode = "implicit"
-	// CacheNone disables caching. cache_control blocks are stripped so a
-	// provider that rejects unknown fields does not fail the request.
+	// CacheNone: caching disabled (cache_control blocks stripped).
 	CacheNone CacheMode = "none"
 )
 
@@ -38,10 +30,9 @@ const (
 type Kind string
 
 const (
-	// KindAnthropic speaks the Anthropic Messages API; requests are proxied
-	// with their cache_control blocks intact.
+	// KindAnthropic: Anthropic Messages API (cache_control intact).
 	KindAnthropic Kind = "anthropic"
-	// KindOpenAI speaks the OpenAI Chat Completions API and needs translation.
+	// KindOpenAI: OpenAI Chat Completions API (needs translation).
 	KindOpenAI Kind = "openai"
 )
 
@@ -57,11 +48,9 @@ type Config struct {
 type Server struct {
 	// Listen is a host:port for the HTTP listener.
 	Listen string `xml:"listen"`
-	// APIKey is the credential Claude Desktop must present. Empty disables the
-	// check, which is only reasonable on a loopback listener.
+	// APIKey is the credential Claude Desktop must present (empty disables check).
 	APIKey string `xml:"apiKey"`
-	// PublicURL is the base URL Desktop should reach this server on. It is
-	// written into the bootstrap overlay as inferenceGatewayBaseUrl.
+	// PublicURL is written to bootstrap as inferenceGatewayBaseUrl.
 	PublicURL string `xml:"publicURL"`
 }
 
@@ -72,8 +61,7 @@ type Bootstrap struct {
 	ChatTabEnabled        *bool  `xml:"chatTabEnabled"`
 	AutoModeEnabled       *bool  `xml:"autoModeEnabled"`
 	ToolSearchEnabled     *bool  `xml:"toolSearchEnabled"`
-	// PreferOneMContext maps to modelPrefer1mContext: pick the 1M variant by
-	// default wherever a model offers one.
+	// PreferOneMContext picks the 1M variant by default (maps to modelPrefer1mContext).
 	PreferOneMContext *bool `xml:"preferOneMContext"`
 	// DisableTelemetry sets both telemetry keys the app understands.
 	DisableTelemetry *bool `xml:"disableTelemetry"`
@@ -103,18 +91,13 @@ type Model struct {
 	ID string `xml:"id,attr"`
 	// Label is the display name shown in the picker.
 	Label string `xml:"label,attr"`
-	// Tier is the Claude family tier this model stands in for: sonnet, opus,
-	// haiku, fable, or mythos. Desktop drops any discovered model that neither
-	// carries a tier nor has an Anthropic-looking ID, so this is required.
+	// Tier: sonnet, opus, haiku, fable, or mythos (required by Desktop).
 	Tier string `xml:"tier,attr"`
 	// TierDefault marks this model as the one a bare tier alias resolves to.
 	TierDefault bool `xml:"tierDefault,attr"`
-	// ContextWindow is the real input-token capacity. At or above
-	// OneMThreshold, Desktop offers the model's 1M-context variant. Advertising
-	// the true number is the point of this program.
+	// ContextWindow is the input-token capacity (1M-context offered if >= OneMThreshold).
 	ContextWindow int `xml:"contextWindow,attr"`
-	// MaxOutputTokens caps the response. Zero leaves the request's own value
-	// alone.
+	// MaxOutputTokens caps the response (zero leaves the request's own value).
 	MaxOutputTokens int `xml:"maxOutputTokens,attr"`
 	// Cache overrides the provider's cache mode for this model.
 	Cache CacheMode `xml:"cache,attr"`

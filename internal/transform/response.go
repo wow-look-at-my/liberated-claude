@@ -154,8 +154,7 @@ func respUsage(usage *wire.OAUsage) wire.Usage {
 	cached := usage.CachedTokens()
 	written := usage.CacheWriteTokens()
 
-	// Subtract cached tokens from input. Cached tokens were already counted in
-	// prompt_tokens by the provider, but Anthropic's input_tokens excludes them.
+	// Subtract cached from input (Anthropic input_tokens excludes them).
 	inputTokens := usage.PromptTokens - cached
 	if inputTokens < 0 {
 		inputTokens = 0
@@ -199,8 +198,7 @@ func StreamOpenAIToAnthropic(dst io.Writer, src io.Reader, advertisedModel strin
 		index int
 	}
 	var currentBlock *blockState
-	// Content block indices are sequential across the whole message, whatever
-	// mix of thinking, text, and tool_use blocks it turns out to contain.
+	// Content block indices are sequential across the message.
 	nextIndex := 0
 
 	// Emit a message_start event to signal the start of streaming.

@@ -84,23 +84,12 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 	})
 }
 
-// unauthenticatedPath reports whether a path is served without a credential.
-//
-// Discovery probes must be exempt. Claude Desktop looks for RFC 8414 metadata
-// under /.well-known/ to decide whether the gateway acts as its own
-// authorization server, and it reads the status: a 401 there says an
-// authorization server exists and refused the request, which starts an SSO flow
-// this gateway does not implement. Answering 404 unauthenticated is what tells
-// it there is no SSO and the static API key is the whole story.
+// unauthenticatedPath exempts discovery probes. 404 tells Desktop no SSO exists.
 func unauthenticatedPath(p string) bool {
 	return p == "/healthz" || strings.HasPrefix(p, "/.well-known/")
 }
 
-// handleWellKnown declines every discovery probe.
-//
-// The 404 is the signal, so it is returned for any well-known document rather
-// than only the OAuth one: an openid-configuration answered any other way would
-// start the same flow.
+// handleWellKnown declines discovery probes (404 for any well-known document).
 func handleWellKnown(w http.ResponseWriter, _ *http.Request) {
 	writeError(w, http.StatusNotFound, "not_found_error",
 		"this gateway authenticates with a static API key and hosts no authorization server metadata")

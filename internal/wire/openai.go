@@ -24,8 +24,7 @@ type OAMessage struct {
 	Name       string          `json:"name,omitempty"`
 	ToolCalls  []OAToolCall    `json:"tool_calls,omitempty"`
 	ToolCallID string          `json:"tool_call_id,omitempty"`
-	// ReasoningContent carries chain-of-thought on providers that return it
-	// (DeepSeek and its many re-hosts). It maps to an Anthropic thinking block.
+	// ReasoningContent is chain-of-thought from providers like DeepSeek.
 	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
@@ -87,8 +86,7 @@ type OAUsage struct {
 	// PromptTokensDetails carries the cache hit count on providers that
 	// implement automatic prefix caching.
 	PromptTokensDetails *OAPromptTokensDetails `json:"prompt_tokens_details,omitempty"`
-	// CacheCreationInputTokens and CacheReadInputTokens appear on gateways that
-	// pass Anthropic accounting through in OpenAI clothing (OpenRouter does).
+	// CacheCreationInputTokens and CacheReadInputTokens: gateways' Anthropic accounting.
 	CacheCreationInputTokens *int `json:"cache_creation_input_tokens,omitempty"`
 	CacheReadInputTokens     *int `json:"cache_read_input_tokens,omitempty"`
 }
@@ -96,8 +94,7 @@ type OAUsage struct {
 // OAPromptTokensDetails breaks down prompt tokens.
 type OAPromptTokensDetails struct {
 	CachedTokens int `json:"cached_tokens"`
-	// CacheWriteTokens is non-standard; DeepSeek reports misses under
-	// prompt_cache_miss_tokens and some gateways mirror it here.
+	// CacheWriteTokens is non-standard (DeepSeek's prompt_cache_miss_tokens).
 	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
 }
 

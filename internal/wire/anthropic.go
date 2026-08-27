@@ -41,8 +41,7 @@ type ContentBlock struct {
 // Message is one turn in the conversation.
 type Message struct {
 	Role string `json:"role"`
-	// Content is either a bare string or a list of ContentBlock. Both forms are
-	// legal on the wire, so it stays raw until a transform needs it.
+	// Content is a bare string or list of ContentBlock (kept raw for transforms).
 	Content json.RawMessage `json:"content"`
 }
 
@@ -72,8 +71,7 @@ type MessagesRequest struct {
 	Metadata      json.RawMessage `json:"metadata,omitempty"`
 	Thinking      json.RawMessage `json:"thinking,omitempty"`
 
-	// Extra keeps beta fields this gateway does not model (context_management
-	// among them) so they reach an Anthropic upstream unchanged.
+	// Extra keeps unmapped beta fields so they reach Anthropic unchanged.
 	Extra map[string]json.RawMessage `json:"-"`
 }
 
@@ -98,16 +96,8 @@ type MessagesResponse struct {
 	Usage        Usage          `json:"usage"`
 }
 
-// ModelInfo is one entry in the /v1/models listing.
-//
-// SupportsOneM and MaxInputTokens are the two fields Claude Desktop consults to
-// decide whether to offer a 1M-context variant:
-//
-//	l(e.supports_1m, e.max_input_tokens)
-//	  where l = (a, b) => typeof a == "boolean" ? a : typeof b == "number" && b >= 1e6
-//
-// AnthropicFamilyTier is not optional in practice: a model carrying neither a
-// recognized tier nor an Anthropic-looking ID is dropped from the listing.
+// ModelInfo is one entry in /v1/models. SupportsOneM and MaxInputTokens
+// decide 1M-context offering; AnthropicFamilyTier is required by Desktop.
 type ModelInfo struct {
 	Type                string `json:"type"`
 	ID                  string `json:"id"`

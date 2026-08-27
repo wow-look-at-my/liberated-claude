@@ -17,8 +17,7 @@ import (
 	"github.com/wow-look-at-my/liberated-claude/internal/wire"
 )
 
-// proxyFixture wires a gateway in front of a stub upstream and records what the
-// upstream received, so the translation can be asserted from both ends.
+// proxyFixture wires a gateway in front of a stub upstream and records requests.
 type proxyFixture struct {
 	handler  http.Handler
 	upstream *httptest.Server
@@ -103,8 +102,7 @@ func TestProxyOpenAITranslatesReplyAndCacheUsage(t *testing.T) {
 	require.Len(t, got.Content, 1, "one text block expected")
 	assert.Equal(t, "hi there", got.Content[0].Text, "text should carry through")
 
-	// Anthropic reports input_tokens exclusive of cache hits, so the 80 cached
-	// of 100 prompt tokens leave 20 billed as input.
+	// Anthropic input_tokens excludes cache hits (80 cached of 100 leaves 20 billed).
 	assert.Equal(t, 20, got.Usage.InputTokens, "cached tokens must be subtracted from input")
 	require.NotNil(t, got.Usage.CacheReadInputTokens, "cache reads should be reported")
 	assert.Equal(t, 80, *got.Usage.CacheReadInputTokens, "cache read count should carry through")
@@ -141,9 +139,7 @@ func TestProxyAnthropicPreservesCacheControl(t *testing.T) {
 func TestProxyStreamingEmitsAnthropicEvents(t *testing.T) {
 	f := newProxyFixture(t, "openai", "implicit", func(w http.ResponseWriter) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		io.WriteString(w, "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hel\"}}]}\n\n")
-		io.WriteString(w, "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":2}}\n\n")
-		io.WriteString(w, "data: [DONE]\n\n")
+		io.WriteString(w, "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hel\"}}]}\n\ndata: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":2}}\n\ndata: [DONE]\n\n")
 	})
 	body := fmt.Sprintf(`{"model":%q,"max_tokens":10,"stream":true,"messages":[{"role":"user","content":"hi"}]}`, modelRef(t))
 	rec := f.post(t, body)

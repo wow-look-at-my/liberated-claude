@@ -167,9 +167,7 @@ func TestFetchOpenRouterHappyPath(t *testing.T) {
 
 	assert.Equal(t, 2, len(result), "should return two models")
 
-	// Verify per-token to per-Mtok conversion: 0.000000075 * 1e6 = 0.075
-	// Scaling by 1e6 is not exact in binary floating point, so the rates are
-	// compared within a tolerance far tighter than any price difference.
+	// Per-token to per-Mtok: 0.000000075 * 1e6 = 0.075 (tolerance for FP precision).
 	const tol = 1e-12
 
 	glm := result["z-ai/glm-5.3-flash"]

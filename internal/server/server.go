@@ -3,6 +3,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -20,6 +21,9 @@ type Server struct {
 	client *http.Client
 	log    *slog.Logger
 
+	// gates admits a bounded number of upstream calls per provider name.
+	gates map[string]chan struct{}
+
 	mu    sync.RWMutex
 	rates map[string]pricing.Rates
 }
@@ -27,7 +31,39 @@ type Server struct {
 // New builds a Server. rates is keyed by advertised model ID and may be nil,
 // in which case Claude Desktop falls back to its own list-price estimate.
 func New(cfg *config.Config, client *http.Client, log *slog.Logger) *Server {
-	return &Server{cfg: cfg, client: client, log: log, rates: map[string]pricing.Rates{}}
+	gates := map[string]chan struct{}{}
+	for i := range cfg.Providers {
+		p := &cfg.Providers[i]
+		if p.MaxConcurrent > 0 {
+			gates[p.Name] = make(chan struct{}, p.MaxConcurrent)
+		}
+	}
+	return &Server{
+		cfg:    cfg,
+		client: client,
+		log:    log,
+		gates:  gates,
+		rates:  map[string]pricing.Rates{},
+	}
+}
+
+// acquire waits for a slot on the provider's gate and returns the release. It
+// bounds how many calls this gateway has in flight at once, because Claude
+// Desktop opens dozens at a time while warming sessions and a provider that
+// limits by concurrency answers the excess with 429 rather than queueing.
+//
+// A provider with no configured limit gets a no-op release.
+func (s *Server) acquire(ctx context.Context, p *config.Provider) (func(), error) {
+	gate, limited := s.gates[p.Name]
+	if !limited {
+		return func() {}, nil
+	}
+	select {
+	case gate <- struct{}{}:
+		return func() { <-gate }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // SetRates replaces the detected pricing table.

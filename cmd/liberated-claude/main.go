@@ -92,6 +92,12 @@ func logModels(cfg *config.Config, log *slog.Logger) {
 		log.Warn("provider skipped: credentials not in the environment",
 			"provider", s.Name, "unset", strings.Join(s.Missing, ", "))
 	}
+	for i := range cfg.Providers {
+		p := &cfg.Providers[i]
+		if p.MaxConcurrent > 0 {
+			log.Info("provider concurrency capped", "provider", p.Name, "maxConcurrent", p.MaxConcurrent)
+		}
+	}
 	for _, m := range cfg.Models() {
 		log.Info("model",
 			"upstream", m.ID,

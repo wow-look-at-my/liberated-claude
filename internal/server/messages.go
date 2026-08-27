@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/wow-look-at-my/liberated-claude/internal/config"
 	"github.com/wow-look-at-my/liberated-claude/internal/transform"
@@ -39,6 +41,14 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	s.log.Info("messages", "model", req.Model, "upstream", model.ID,
 		"provider", model.Provider().Name, "stream", req.Stream)
+
+	// Held for the whole exchange, since a streamed body is still upstream work.
+	release, err := s.acquire(r.Context(), model.Provider())
+	if err != nil {
+		writeError(w, http.StatusRequestTimeout, "request_canceled", err.Error())
+		return
+	}
+	defer release()
 
 	if model.Provider().Kind == config.KindAnthropic {
 		s.proxyAnthropic(w, r, &req, body, model)
@@ -77,13 +87,66 @@ func (s *Server) proxyAnthropic(
 	}
 	applyHeaders(upstream, p)
 
-	resp, err := s.client.Do(upstream)
+	resp, err := s.sendUpstream(upstream)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "api_error", err.Error())
 		return
 	}
 	defer resp.Body.Close()
 	copyResponse(w, resp, req.Stream)
+}
+
+// retryBackoff is how long to wait before each retry of a throttled call.
+var retryBackoff = []time.Duration{
+	250 * time.Millisecond,
+	1 * time.Second,
+	3 * time.Second,
+}
+
+// sendUpstream issues req, retrying while the provider reports it is throttled.
+// The gate above bounds this gateway's own concurrency, but a provider account
+// is shared, so a 429 can still arrive from work started elsewhere.
+func (s *Server) sendUpstream(req *http.Request) (*http.Response, error) {
+	for attempt := 0; ; attempt++ {
+		resp, err := s.client.Do(req)
+		if err != nil || !throttled(resp.StatusCode) || attempt >= len(retryBackoff) {
+			return resp, err
+		}
+		wait := retryAfter(resp, retryBackoff[attempt])
+		s.log.Warn("upstream throttled, retrying",
+			"status", resp.StatusCode, "attempt", attempt+1, "wait", wait)
+		resp.Body.Close()
+
+		// A replayable body is required to send the same request twice.
+		if req.GetBody == nil {
+			return resp, fmt.Errorf("upstream returned %d and the request cannot be replayed", resp.StatusCode)
+		}
+		body, err := req.GetBody()
+		if err != nil {
+			return nil, fmt.Errorf("replay request body: %w", err)
+		}
+		req.Body = body
+
+		select {
+		case <-time.After(wait):
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
+	}
+}
+
+// throttled reports whether a status means "try again shortly".
+func throttled(status int) bool {
+	return status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable
+}
+
+// retryAfter prefers the provider's own Retry-After over the local backoff.
+func retryAfter(resp *http.Response, fallback time.Duration) time.Duration {
+	secs, err := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After")))
+	if err != nil || secs < 0 {
+		return fallback
+	}
+	return time.Duration(secs) * time.Second
 }
 
 // proxyOpenAI translates the request to Chat Completions, sends it, and
@@ -114,7 +177,7 @@ func (s *Server) proxyOpenAI(
 	upstream.Header.Set("Authorization", "Bearer "+p.APIKey)
 	applyHeaders(upstream, p)
 
-	resp, err := s.client.Do(upstream)
+	resp, err := s.sendUpstream(upstream)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "api_error", err.Error())
 		return

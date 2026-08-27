@@ -87,9 +87,11 @@ type Provider struct {
 	APIKey  string    `xml:"apiKey"`
 	Cache   CacheMode `xml:"cache,attr"`
 	// ReasoningField is the JSON key this provider uses for chain-of-thought.
-	ReasoningField string   `xml:"reasoningField,attr"`
-	Headers        []Header `xml:"headers>header"`
-	Models         []Model  `xml:"models>model"`
+	ReasoningField string `xml:"reasoningField,attr"`
+	// MaxConcurrent caps in-flight upstream calls (0 means no cap).
+	MaxConcurrent int      `xml:"maxConcurrent,attr"`
+	Headers       []Header `xml:"headers>header"`
+	Models        []Model  `xml:"models>model"`
 }
 
 // The two spellings of the chain-of-thought field: DeepSeek uses the first,
@@ -299,6 +301,9 @@ func (c *Config) validate() error {
 		default:
 			return fmt.Errorf("provider %q: unknown reasoningField %q (want %s or %s)",
 				p.Name, p.ReasoningField, ReasoningContent, Reasoning)
+		}
+		if p.MaxConcurrent < 0 {
+			return fmt.Errorf("provider %q: maxConcurrent must not be negative", p.Name)
 		}
 		if len(p.Models) == 0 {
 			return fmt.Errorf("provider %q: at least one model is required", p.Name)

@@ -86,9 +86,18 @@ type Provider struct {
 	BaseURL string    `xml:"baseURL"`
 	APIKey  string    `xml:"apiKey"`
 	Cache   CacheMode `xml:"cache,attr"`
-	Headers []Header  `xml:"headers>header"`
-	Models  []Model   `xml:"models>model"`
+	// ReasoningField is the JSON key this provider uses for chain-of-thought.
+	ReasoningField string   `xml:"reasoningField,attr"`
+	Headers        []Header `xml:"headers>header"`
+	Models         []Model  `xml:"models>model"`
 }
+
+// The two spellings of the chain-of-thought field: DeepSeek uses the first,
+// OpenRouter and Ollama the second.
+const (
+	ReasoningContent = "reasoning_content"
+	Reasoning        = "reasoning"
+)
 
 // Header is an extra HTTP header sent upstream, such as OpenRouter's
 // HTTP-Referer attribution.
@@ -130,6 +139,16 @@ func (m *Model) EffectiveCache() CacheMode {
 		return m.provider.Cache
 	}
 	return CacheNone
+}
+
+// ReasoningFieldName is the key a replayed assistant turn carries its
+// chain-of-thought under. Defaults to reasoning_content, the spelling whose
+// absence makes DeepSeek reject a multi-turn request outright.
+func (m *Model) ReasoningFieldName() string {
+	if m.provider != nil && m.provider.ReasoningField != "" {
+		return m.provider.ReasoningField
+	}
+	return ReasoningContent
 }
 
 // SupportsOneM reports whether Desktop should offer a 1M-context variant.
@@ -274,6 +293,12 @@ func (c *Config) validate() error {
 		case "", CacheExplicit, CacheImplicit, CacheNone:
 		default:
 			return fmt.Errorf("provider %q: unknown cache mode %q", p.Name, p.Cache)
+		}
+		switch p.ReasoningField {
+		case "", ReasoningContent, Reasoning:
+		default:
+			return fmt.Errorf("provider %q: unknown reasoningField %q (want %s or %s)",
+				p.Name, p.ReasoningField, ReasoningContent, Reasoning)
 		}
 		if len(p.Models) == 0 {
 			return fmt.Errorf("provider %q: at least one model is required", p.Name)

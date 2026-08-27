@@ -18,8 +18,19 @@ type OAMessage struct {
 	Name       string          `json:"name,omitempty"`
 	ToolCalls  []OAToolCall    `json:"tool_calls,omitempty"`
 	ToolCallID string          `json:"tool_call_id,omitempty"`
-	// ReasoningContent is chain-of-thought from providers like DeepSeek.
+	// ReasoningContent is chain-of-thought as DeepSeek and Alibaba spell it.
 	ReasoningContent string `json:"reasoning_content,omitempty"`
+	// Reasoning is the same content as OpenRouter, Ollama, and Groq spell it.
+	Reasoning string `json:"reasoning,omitempty"`
+}
+
+// ReasoningText returns the chain-of-thought under whichever field name the
+// provider used. Reading one name only would lose reasoning that was billed.
+func (m *OAMessage) ReasoningText() string {
+	if m.ReasoningContent != "" {
+		return m.ReasoningContent
+	}
+	return m.Reasoning
 }
 
 // OAToolCall is a function call requested by the model.

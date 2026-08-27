@@ -370,7 +370,7 @@ func TestAnthropicToOpenAI_ToolResultWithTextBefore(t *testing.T) {
 	assert.Equal(t, "user", out.Messages[2].Role, "third should be user with remaining text")
 }
 
-func TestAnthropicToOpenAI_ThinkingBlockDropped(t *testing.T) {
+func TestAnthropicToOpenAI_ThinkingBlockPreserved(t *testing.T) {
 	blocks := []wire.ContentBlock{
 		{
 			Type:     "thinking",
@@ -404,7 +404,9 @@ func TestAnthropicToOpenAI_ThinkingBlockDropped(t *testing.T) {
 
 	var text string
 	json.Unmarshal(out.Messages[0].Content, &text)
-	assert.Equal(t, "Here is my response", text, "thinking block should be dropped, only text remains")
+	assert.Equal(t, "Here is my response", text, "text block becomes the message content")
+	assert.Equal(t, "I should think about this", out.Messages[0].ReasoningContent,
+		"thinking block rides along as reasoning_content")
 }
 
 func TestAnthropicToOpenAI_MaxTokensClamping(t *testing.T) {

@@ -59,11 +59,11 @@ func OpenAIToAnthropic(resp *wire.OAResponse, advertisedModel string) (*wire.Mes
 func respContentBlocks(msg *wire.OAMessage) []wire.ContentBlock {
 	var blocks []wire.ContentBlock
 
-	// Emit thinking block first if reasoning_content is present.
-	if msg.ReasoningContent != "" {
+	// Emit thinking block first if the model reasoned.
+	if reasoning := msg.ReasoningText(); reasoning != "" {
 		blocks = append(blocks, wire.ContentBlock{
 			Type:     "thinking",
-			Thinking: msg.ReasoningContent,
+			Thinking: reasoning,
 		})
 	}
 
@@ -268,7 +268,7 @@ func StreamOpenAIToAnthropic(dst io.Writer, src io.Reader, advertisedModel strin
 		delta := choice.Delta
 
 		// Process thinking content.
-		if delta.ReasoningContent != "" {
+		if reasoning := delta.ReasoningText(); reasoning != "" {
 			if currentBlock == nil || currentBlock.typ != "thinking" {
 				if currentBlock != nil {
 					if err := streamEmit(dst, "content_block_stop", map[string]interface{}{}); err != nil {
@@ -293,7 +293,7 @@ func StreamOpenAIToAnthropic(dst io.Writer, src io.Reader, advertisedModel strin
 				"type": "content_block_delta",
 				"delta": map[string]interface{}{
 					"type":     "thinking_delta",
-					"thinking": delta.ReasoningContent,
+					"thinking": reasoning,
 				},
 				"index": currentBlock.index,
 			}); err != nil {

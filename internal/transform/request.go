@@ -56,7 +56,7 @@ func AnthropicToOpenAI(req *wire.MessagesRequest, m *config.Model) (*wire.OARequ
 	for _, msg := range req.Messages {
 		if msg.Role == "assistant" {
 			// Assistant messages may contain tool_use blocks, which become ToolCalls.
-			oamsg, err := reqAssistantMessage(msg, m.EffectiveCache())
+			oamsg, err := reqAssistantMessage(msg, m)
 			if err != nil {
 				return nil, err
 			}
@@ -127,8 +127,10 @@ func reqSystemText(system json.RawMessage, mode config.CacheMode) (string, error
 	return s, nil
 }
 
-// reqAssistantMessage converts an assistant message, extracting tool_use blocks as ToolCalls.
-func reqAssistantMessage(msg wire.Message, mode config.CacheMode) (wire.OAMessage, error) {
+// reqAssistantMessage converts an assistant message, extracting tool_use blocks
+// as ToolCalls and replaying thinking blocks as the provider's reasoning field.
+func reqAssistantMessage(msg wire.Message, m *config.Model) (wire.OAMessage, error) {
+	mode := m.EffectiveCache()
 	out := wire.OAMessage{Role: "assistant"}
 
 	// Parse content (string or array).
@@ -137,8 +139,12 @@ func reqAssistantMessage(msg wire.Message, mode config.CacheMode) (wire.OAMessag
 		return wire.OAMessage{}, err
 	}
 
+	var thinking []string
 	var textParts []wire.OAContentPart
 	for _, block := range content {
+		if block.Type == "thinking" && block.Thinking != "" {
+			thinking = append(thinking, block.Thinking)
+		}
 		if block.Type == "text" {
 			part := wire.OAContentPart{Type: "text", Text: block.Text}
 			if mode == config.CacheExplicit && block.CacheControl != nil {
@@ -163,7 +169,17 @@ func reqAssistantMessage(msg wire.Message, mode config.CacheMode) (wire.OAMessag
 				},
 			})
 		}
-		// Thinking blocks are dropped (not replayable upstream).
+	}
+
+	// DeepSeek rejects a multi-turn request whose assistant turns lost their
+	// reasoning, so the field name has to match what the provider reads.
+	if len(thinking) > 0 {
+		joined := strings.Join(thinking, "\n\n")
+		if m.ReasoningFieldName() == config.Reasoning {
+			out.Reasoning = joined
+		} else {
+			out.ReasoningContent = joined
+		}
 	}
 
 	// If only text and no tool calls, emit as bare string if no cache directive.
@@ -240,7 +256,6 @@ func reqUserMessages(msg wire.Message, mode config.CacheMode) ([]wire.OAMessage,
 				Content:    json.RawMessage([]byte(fmt.Sprintf("%q", toolResultText))),
 			})
 		}
-		// Thinking blocks are dropped.
 	}
 
 	// Emit any remaining text/images.

@@ -43,9 +43,15 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	count = estimateInputTokens(&req)
+	count, err = countInputTokens(&req)
+	if err != nil {
+		// Guessing a number here would be worse than saying the count failed.
+		s.log.Error("tokenizer failed", "model", req.Model, "error", err)
+		writeError(w, http.StatusInternalServerError, "api_error", err.Error())
+		return
+	}
 	s.log.Info("count_tokens", "model", req.Model, "provider", p.Name,
-		"source", "estimate", "input_tokens", count)
+		"source", "tokenizer", "input_tokens", count)
 	writeJSON(w, http.StatusOK, map[string]int{"input_tokens": count})
 }
 

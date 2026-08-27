@@ -1,42 +1,54 @@
 package server
 
-import "github.com/wow-look-at-my/liberated-claude/internal/wire"
+import (
+	"sync"
 
-// bytesPerToken is the divisor used when no provider will count for us.
-//
-// Real tokenizers land between 2 and 4 bytes per token depending on how much
-// of the text is prose; 2 is the dense-JSON end of that range, so the estimate
-// errs high. That direction is deliberate: a client that thinks it has more
-// room than it does overflows the context, while one that thinks it has less
-// merely compacts sooner.
-const bytesPerToken = 2
+	tokenizer "github.com/wow-look-at-my/go-tokenizer"
+
+	"github.com/wow-look-at-my/liberated-claude/internal/wire"
+)
 
 // perMessageOverhead is the framing each turn costs beyond its own text.
 const perMessageOverhead = 4
 
-// estimateInputTokens approximates the prompt size of a Messages request.
+// bpe is the shared cl100k_base tokenizer, built once and reused.
+var bpe = sync.OnceValues(tokenizer.New)
+
+// countInputTokens measures the prompt of a Messages request, for a provider
+// that will not count it for us.
 //
-// The count covers everything the provider bills as input: the system prompt,
-// every turn, and the tool schemas, which routinely outweigh the conversation.
-func estimateInputTokens(req *wire.MessagesRequest) int {
-	total := textTokens(len(req.System))
+// Everything billed as input is included: the system prompt, every turn, and
+// the tool schemas, which routinely outweigh the conversation. cl100k_base is
+// not the vocabulary these models use, so the result is close, not exact.
+func countInputTokens(req *wire.MessagesRequest) (int, error) {
+	tok, err := bpe()
+	if err != nil {
+		return 0, err
+	}
+	total, err := tok.CountTokens(string(req.System))
+	if err != nil {
+		return 0, err
+	}
 	for _, msg := range req.Messages {
-		total += textTokens(len(msg.Content)) + perMessageOverhead
+		n, err := tok.CountTokens(string(msg.Content))
+		if err != nil {
+			return 0, err
+		}
+		total += n + perMessageOverhead
 	}
 	for _, t := range req.Tools {
-		total += textTokens(len(t.Name) + len(t.Description) + len(t.InputSchema))
+		n, err := tok.CountTokens(t.Name + t.Description + string(t.InputSchema))
+		if err != nil {
+			return 0, err
+		}
+		total += n
 	}
 	if len(req.ToolChoice) > 0 {
-		total += textTokens(len(req.ToolChoice))
+		n, err := tok.CountTokens(string(req.ToolChoice))
+		if err != nil {
+			return 0, err
+		}
+		total += n
 	}
-	return total
-}
-
-// textTokens converts a byte length to an estimated token count, rounding up
-// so that any content at all counts as at least one token.
-func textTokens(n int) int {
-	if n <= 0 {
-		return 0
-	}
-	return (n + bytesPerToken - 1) / bytesPerToken
+	return total, nil
 }

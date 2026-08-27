@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/wow-look-at-my/liberated-claude/internal/wire"
 )
 
 // postCount sends a count_tokens request to h and returns the reported count.
@@ -78,7 +80,30 @@ func TestCountTokensRejectsUnknownModel(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, code)
 }
 
-func TestEstimateCountsToolsAndSystem(t *testing.T) {
+func TestFallbackUsesTheRealTokenizer(t *testing.T) {
+	tok, err := bpe()
+	require.NoError(t, err)
+
+	// cl100k_base splits this into exactly two tokens, so a count that merely
+	// scaled the byte length would not land here.
+	n, err := tok.CountTokens("Hello World")
+	require.NoError(t, err)
+	require.Equal(t, 2, n)
+
+	req := &wire.MessagesRequest{
+		Messages: []wire.Message{{Role: "user", Content: json.RawMessage(`"Hello World"`)}},
+	}
+	total, err := countInputTokens(req)
+	require.NoError(t, err)
+
+	// The turn's content is JSON-quoted, so it costs its own tokens plus the
+	// quotes, plus the per-message framing.
+	quoted, err := tok.CountTokens(`"Hello World"`)
+	require.NoError(t, err)
+	require.Equal(t, quoted+perMessageOverhead, total)
+}
+
+func TestFallbackCountsToolsAndSystem(t *testing.T) {
 	upstream := httptest.NewServer(http.NotFoundHandler())
 	defer upstream.Close()
 	h := New(throttleConfig(t, upstream.URL, 2), upstream.Client(), slog.New(slog.DiscardHandler)).Handler()

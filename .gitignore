@@ -6,3 +6,4 @@ config.xml
 /build/
 build_output.txt
 *.output
+/logs/

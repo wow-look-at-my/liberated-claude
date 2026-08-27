@@ -4,10 +4,14 @@ on:
   push:
   workflow_dispatch:
 
+# go-toolchain's autorelease is default-on and needs every grant past id-token.
 permissions:
   id-token: write
-  contents: read
+  contents: write
   actions: read
+  checks: read
+  deployments: write
+  artifact-metadata: write
 
 jobs:
   # Never name a job `all-builds`; go-toolchain fails any run that shadows it.

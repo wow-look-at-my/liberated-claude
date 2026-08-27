@@ -1,0 +1,328 @@
+// Package config loads the XML file describing providers and models.
+package config
+
+import (
+	"encoding/xml"
+	"fmt"
+	"os"
+	"regexp"
+	"strings"
+
+	"github.com/wow-look-at-my/liberated-claude/internal/alias"
+)
+
+// OneMThreshold is the input-token count at or above which Claude Desktop
+// treats a model as 1M-context. Taken from the app's discovery mapping:
+//
+//	let l = (e, t) => typeof e == "boolean" ? e : typeof t == "number" && t >= 1e6;
+//
+// applied as l(model.supports_1m, model.max_input_tokens).
+const OneMThreshold = 1_000_000
+
+// CacheMode says how a provider expects prompt caching to be requested.
+type CacheMode string
+
+const (
+	// CacheExplicit means the provider honors Anthropic cache_control blocks,
+	// which are forwarded untouched.
+	CacheExplicit CacheMode = "explicit"
+	// CacheImplicit means the provider caches long prefixes automatically. No
+	// cache directive is sent; cache hits are read back from the usage block.
+	CacheImplicit CacheMode = "implicit"
+	// CacheNone disables caching. cache_control blocks are stripped so a
+	// provider that rejects unknown fields does not fail the request.
+	CacheNone CacheMode = "none"
+)
+
+// Kind is the wire protocol a provider speaks.
+type Kind string
+
+const (
+	// KindAnthropic speaks the Anthropic Messages API; requests are proxied
+	// with their cache_control blocks intact.
+	KindAnthropic Kind = "anthropic"
+	// KindOpenAI speaks the OpenAI Chat Completions API and needs translation.
+	KindOpenAI Kind = "openai"
+)
+
+// Config is the whole XML document.
+type Config struct {
+	XMLName   xml.Name   `xml:"liberatedClaude"`
+	Server    Server     `xml:"server"`
+	Bootstrap Bootstrap  `xml:"bootstrap"`
+	Providers []Provider `xml:"providers>provider"`
+}
+
+// Server describes the local listener.
+type Server struct {
+	// Listen is a host:port for the HTTP listener.
+	Listen string `xml:"listen"`
+	// APIKey is the credential Claude Desktop must present. Empty disables the
+	// check, which is only reasonable on a loopback listener.
+	APIKey string `xml:"apiKey"`
+	// PublicURL is the base URL Desktop should reach this server on. It is
+	// written into the bootstrap overlay as inferenceGatewayBaseUrl.
+	PublicURL string `xml:"publicURL"`
+}
+
+// Bootstrap carries the parts of the config overlay that are not derived from
+// the provider list. Every field maps to a documented Claude Desktop setting.
+type Bootstrap struct {
+	DeploymentDisplayName string `xml:"deploymentDisplayName"`
+	ChatTabEnabled        *bool  `xml:"chatTabEnabled"`
+	AutoModeEnabled       *bool  `xml:"autoModeEnabled"`
+	ToolSearchEnabled     *bool  `xml:"toolSearchEnabled"`
+	// PreferOneMContext maps to modelPrefer1mContext: pick the 1M variant by
+	// default wherever a model offers one.
+	PreferOneMContext *bool `xml:"preferOneMContext"`
+	// DisableTelemetry sets both telemetry keys the app understands.
+	DisableTelemetry *bool `xml:"disableTelemetry"`
+}
+
+// Provider is one upstream API and the models reachable through it.
+type Provider struct {
+	Name    string    `xml:"name,attr"`
+	Kind    Kind      `xml:"kind,attr"`
+	BaseURL string    `xml:"baseURL"`
+	APIKey  string    `xml:"apiKey"`
+	Cache   CacheMode `xml:"cache,attr"`
+	Headers []Header  `xml:"headers>header"`
+	Models  []Model   `xml:"models>model"`
+}
+
+// Header is an extra HTTP header sent upstream, such as OpenRouter's
+// HTTP-Referer attribution.
+type Header struct {
+	Name  string `xml:"name,attr"`
+	Value string `xml:",chardata"`
+}
+
+// Model is one entry in Claude Desktop's model picker.
+type Model struct {
+	// ID is the model name exactly as the upstream provider expects it.
+	ID string `xml:"id,attr"`
+	// Label is the display name shown in the picker.
+	Label string `xml:"label,attr"`
+	// Tier is the Claude family tier this model stands in for: sonnet, opus,
+	// haiku, fable, or mythos. Desktop drops any discovered model that neither
+	// carries a tier nor has an Anthropic-looking ID, so this is required.
+	Tier string `xml:"tier,attr"`
+	// TierDefault marks this model as the one a bare tier alias resolves to.
+	TierDefault bool `xml:"tierDefault,attr"`
+	// ContextWindow is the real input-token capacity. At or above
+	// OneMThreshold, Desktop offers the model's 1M-context variant. Advertising
+	// the true number is the point of this program.
+	ContextWindow int `xml:"contextWindow,attr"`
+	// MaxOutputTokens caps the response. Zero leaves the request's own value
+	// alone.
+	MaxOutputTokens int `xml:"maxOutputTokens,attr"`
+	// Cache overrides the provider's cache mode for this model.
+	Cache CacheMode `xml:"cache,attr"`
+
+	// provider is filled in during Load so a resolved model knows its origin.
+	provider *Provider
+}
+
+// Provider returns the provider this model is served by.
+func (m *Model) Provider() *Provider { return m.provider }
+
+// EffectiveCache returns the cache mode in force for this model.
+func (m *Model) EffectiveCache() CacheMode {
+	if m.Cache != "" {
+		return m.Cache
+	}
+	if m.provider != nil && m.provider.Cache != "" {
+		return m.provider.Cache
+	}
+	return CacheNone
+}
+
+// SupportsOneM reports whether Desktop should offer a 1M-context variant.
+func (m *Model) SupportsOneM() bool { return m.ContextWindow >= OneMThreshold }
+
+// AliasID is the model ID advertised to Desktop, which may differ from the
+// upstream ID when the real one would be rejected by the model screen.
+func (m *Model) AliasID() string { return alias.Encode(m.ID) }
+
+// DisplayName is the picker label, falling back to the upstream ID.
+func (m *Model) DisplayName() string {
+	if m.Label != "" {
+		return m.Label
+	}
+	return m.ID
+}
+
+// envRef matches ${NAME} references inside config text.
+var envRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+// expandEnv substitutes ${NAME} from the environment.
+//
+// An unset variable is an error rather than an empty string: silently sending
+// an empty API key upstream produces a 401 whose cause is invisible from the
+// config file.
+func expandEnv(s string) (string, error) {
+	var missing []string
+	out := envRef.ReplaceAllStringFunc(s, func(ref string) string {
+		name := envRef.FindStringSubmatch(ref)[1]
+		val, ok := os.LookupEnv(name)
+		if !ok {
+			missing = append(missing, name)
+			return ""
+		}
+		return val
+	})
+	if len(missing) > 0 {
+		return "", fmt.Errorf("unset environment variable(s): %s", strings.Join(missing, ", "))
+	}
+	return out, nil
+}
+
+// Load reads and validates the config at path.
+func Load(path string) (*Config, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+	return Parse(raw)
+}
+
+// Parse decodes and validates config XML.
+func Parse(raw []byte) (*Config, error) {
+	var c Config
+	if err := xml.Unmarshal(raw, &c); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	if err := c.expand(); err != nil {
+		return nil, err
+	}
+	if err := c.validate(); err != nil {
+		return nil, err
+	}
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		for j := range p.Models {
+			p.Models[j].provider = p
+		}
+	}
+	return &c, nil
+}
+
+// expand resolves ${VAR} references in the fields that carry secrets or URLs.
+func (c *Config) expand() error {
+	fields := []*string{&c.Server.APIKey, &c.Server.Listen, &c.Server.PublicURL}
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		fields = append(fields, &p.APIKey, &p.BaseURL)
+		for j := range p.Headers {
+			fields = append(fields, &p.Headers[j].Value)
+		}
+	}
+	for _, f := range fields {
+		v, err := expandEnv(*f)
+		if err != nil {
+			return err
+		}
+		*f = v
+	}
+	return nil
+}
+
+// validate rejects a config that would produce a broken or silently degraded
+// gateway. Each check corresponds to a failure that is hard to diagnose from
+// Claude Desktop, where the only symptom is a missing or non-working model.
+func (c *Config) validate() error {
+	if c.Server.Listen == "" {
+		return fmt.Errorf("server.listen is required")
+	}
+	if len(c.Providers) == 0 {
+		return fmt.Errorf("at least one provider is required")
+	}
+	seenAlias := map[string]string{}
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if p.Name == "" {
+			return fmt.Errorf("provider %d: name attribute is required", i)
+		}
+		switch p.Kind {
+		case KindAnthropic, KindOpenAI:
+		case "":
+			return fmt.Errorf("provider %q: kind attribute is required (anthropic or openai)", p.Name)
+		default:
+			return fmt.Errorf("provider %q: unknown kind %q", p.Name, p.Kind)
+		}
+		if p.BaseURL == "" {
+			return fmt.Errorf("provider %q: baseURL is required", p.Name)
+		}
+		switch p.Cache {
+		case "", CacheExplicit, CacheImplicit, CacheNone:
+		default:
+			return fmt.Errorf("provider %q: unknown cache mode %q", p.Name, p.Cache)
+		}
+		if len(p.Models) == 0 {
+			return fmt.Errorf("provider %q: at least one model is required", p.Name)
+		}
+		for j := range p.Models {
+			if err := validateModel(p, &p.Models[j], j, seenAlias); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateModel(p *Provider, m *Model, idx int, seenAlias map[string]string) error {
+	if m.ID == "" {
+		return fmt.Errorf("provider %q model %d: id attribute is required", p.Name, idx)
+	}
+	// Desktop keeps a discovered model only when lo(id) passes or a valid tier
+	// is present. An encoded alias never satisfies lo() on its own merits, so
+	// requiring a tier here is what keeps the model in the picker at all.
+	if !alias.IsTier(m.Tier) {
+		return fmt.Errorf(
+			"provider %q model %q: tier attribute must be one of %s (Claude Desktop drops models without a recognized tier)",
+			p.Name, m.ID, strings.Join(alias.Tiers, ", "))
+	}
+	if m.ContextWindow <= 0 {
+		return fmt.Errorf(
+			"provider %q model %q: contextWindow attribute is required and must be positive",
+			p.Name, m.ID)
+	}
+	switch m.Cache {
+	case "", CacheExplicit, CacheImplicit, CacheNone:
+	default:
+		return fmt.Errorf("provider %q model %q: unknown cache mode %q", p.Name, m.ID, m.Cache)
+	}
+	// Two models sharing an advertised ID would make routing ambiguous, and the
+	// second would silently shadow the first in the picker.
+	a := m.AliasID()
+	if prev, dup := seenAlias[a]; dup {
+		return fmt.Errorf("model %q collides with %q: both advertise ID %q", m.ID, prev, a)
+	}
+	seenAlias[a] = m.ID
+	return nil
+}
+
+// Models returns every configured model, in document order.
+func (c *Config) Models() []*Model {
+	var out []*Model
+	for i := range c.Providers {
+		for j := range c.Providers[i].Models {
+			out = append(out, &c.Providers[i].Models[j])
+		}
+	}
+	return out
+}
+
+// Resolve maps a model ID received from Claude Desktop back to its
+// configuration. It accepts the advertised alias, the raw upstream ID, and
+// either form carrying a "[1m]" variant marker.
+func (c *Config) Resolve(id string) (*Model, bool) {
+	base, _ := alias.SplitOneM(strings.TrimSpace(id))
+	upstream := alias.Decode(base)
+	for _, m := range c.Models() {
+		if m.ID == upstream || m.AliasID() == base {
+			return m, true
+		}
+	}
+	return nil, false
+}

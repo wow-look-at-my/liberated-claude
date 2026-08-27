@@ -88,6 +88,10 @@ func run(configPath string, log *slog.Logger) error {
 // models so a misconfigured contextWindow is visible at startup rather than as
 // a silently truncated conversation later.
 func logModels(cfg *config.Config, log *slog.Logger) {
+	for _, s := range cfg.Skipped {
+		log.Warn("provider skipped: credentials not in the environment",
+			"provider", s.Name, "unset", strings.Join(s.Missing, ", "))
+	}
 	for _, m := range cfg.Models() {
 		log.Info("model",
 			"upstream", m.ID,

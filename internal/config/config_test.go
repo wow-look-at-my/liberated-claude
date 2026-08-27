@@ -204,29 +204,26 @@ func TestDisplayName(t *testing.T) {
 func TestExpandEnv(t *testing.T) {
 	t.Run("variable is set", func(t *testing.T) {
 		t.Setenv("TEST_VAR", "test-value")
-		result, err := expandEnv("prefix-${TEST_VAR}-suffix")
-		require.NoError(t, err, "expandEnv with set variable should not error")
-		assert.Equal(t, "prefix-test-value-suffix", result, "expandEnv should substitute set variables")
+		result, missing := expandRefs("prefix-${TEST_VAR}-suffix")
+		assert.Empty(t, missing, "a set variable should not be reported missing")
+		assert.Equal(t, "prefix-test-value-suffix", result, "expandRefs should substitute set variables")
 	})
 
-	t.Run("variable not set returns error", func(t *testing.T) {
-		// Ensure the variable is not set
+	t.Run("variable not set is reported", func(t *testing.T) {
 		os.Unsetenv("NONEXISTENT_VAR_XYZ")
-		result, err := expandEnv("prefix-${NONEXISTENT_VAR_XYZ}-suffix")
-		assert.Error(t, err, "expandEnv with unset variable should error")
-		assert.Contains(t, err.Error(), "NONEXISTENT_VAR_XYZ", "error should mention the variable name")
-		assert.Equal(t, "", result, "result should be empty on error")
+		_, missing := expandRefs("prefix-${NONEXISTENT_VAR_XYZ}-suffix")
+		assert.Equal(t, []string{"NONEXISTENT_VAR_XYZ"}, missing, "the unset name should be reported")
 	})
 
 	t.Run("multiple variables", func(t *testing.T) {
 		t.Setenv("VAR1", "value1")
 		t.Setenv("VAR2", "value2")
-		result, err := expandEnv("${VAR1}+${VAR2}")
-		require.NoError(t, err, "expandEnv with multiple set variables should not error")
-		assert.Equal(t, "value1+value2", result, "expandEnv should substitute all variables")
+		result, missing := expandRefs("${VAR1}+${VAR2}")
+		assert.Empty(t, missing, "set variables should not be reported missing")
+		assert.Equal(t, "value1+value2", result, "expandRefs should substitute all variables")
 	})
 
-	t.Run("parse with expandEnv error", func(t *testing.T) {
+	t.Run("parse with unset server variable", func(t *testing.T) {
 		xml := `<?xml version="1.0" encoding="UTF-8"?>
 <liberatedClaude>
 	<server>
@@ -237,9 +234,81 @@ func TestExpandEnv(t *testing.T) {
 </liberatedClaude>`
 		os.Unsetenv("UNSET_API_KEY")
 		_, err := Parse([]byte(xml))
-		assert.Error(t, err, "Parse should error when expandEnv fails")
+		assert.Error(t, err, "an unset server variable should be fatal")
 		assert.Contains(t, err.Error(), "UNSET_API_KEY", "error should mention the unset variable")
 	})
+}
+
+// A provider whose key is absent must be dropped rather than advertised.
+// Claude Desktop probes a single model to validate the gateway, so one broken
+// provider fails setup for every provider.
+func TestProviderWithUnsetKeyIsSkippedNotFatal(t *testing.T) {
+	os.Unsetenv("NO_SUCH_ANTHROPIC_KEY")
+	t.Setenv("PRESENT_KEY", "real-key")
+
+	xml := `<?xml version="1.0" encoding="UTF-8"?>
+<liberatedClaude>
+	<server><listen>127.0.0.1:8787</listen><publicURL>http://x</publicURL><apiKey></apiKey></server>
+	<providers>
+		<provider name="anthropic" kind="anthropic" cache="explicit">
+			<baseURL>https://api.anthropic.com</baseURL>
+			<apiKey>${NO_SUCH_ANTHROPIC_KEY}</apiKey>
+			<models>
+				<model id="claude-sonnet-5" label="Sonnet" tier="sonnet"
+				       contextWindow="1000000" maxOutputTokens="8192"/>
+			</models>
+		</provider>
+		<provider name="ollama" kind="openai" cache="implicit">
+			<baseURL>https://ollama.com/v1</baseURL>
+			<apiKey>${PRESENT_KEY}</apiKey>
+			<models>
+				<model id="glm-5.3-flash" label="GLM" tier="opus"
+				       contextWindow="1048576" maxOutputTokens="8192"/>
+			</models>
+		</provider>
+	</providers>
+</liberatedClaude>`
+
+	cfg, err := Parse([]byte(xml))
+	require.NoError(t, err, "one unusable provider must not fail the whole load")
+
+	require.Len(t, cfg.Providers, 1, "only the usable provider should survive")
+	assert.Equal(t, "ollama", cfg.Providers[0].Name, "the provider with a key should be kept")
+	assert.Equal(t, "real-key", cfg.Providers[0].APIKey, "the surviving key should be expanded")
+
+	require.Len(t, cfg.Skipped, 1, "the dropped provider should be recorded")
+	assert.Equal(t, "anthropic", cfg.Skipped[0].Name, "the skipped provider should be named")
+	assert.Equal(t, []string{"NO_SUCH_ANTHROPIC_KEY"}, cfg.Skipped[0].Missing,
+		"the unset variable should be reported so the cause is visible")
+
+	_, found := cfg.Resolve("claude-sonnet-5")
+	assert.False(t, found, "a skipped provider's model must not be resolvable")
+	assert.Contains(t, cfg.SkippedSummary()[0], "NO_SUCH_ANTHROPIC_KEY",
+		"the summary should name the variable to set")
+}
+
+// With no provider left there is nothing to serve, and the error has to say
+// why rather than claiming the config listed no providers.
+func TestAllProvidersSkippedIsFatalWithCause(t *testing.T) {
+	os.Unsetenv("NO_SUCH_KEY_AT_ALL")
+	xml := `<?xml version="1.0" encoding="UTF-8"?>
+<liberatedClaude>
+	<server><listen>127.0.0.1:8787</listen><publicURL>http://x</publicURL><apiKey></apiKey></server>
+	<providers>
+		<provider name="only" kind="openai" cache="implicit">
+			<baseURL>https://example.invalid/v1</baseURL>
+			<apiKey>${NO_SUCH_KEY_AT_ALL}</apiKey>
+			<models>
+				<model id="m" label="M" tier="opus" contextWindow="128000" maxOutputTokens="1024"/>
+			</models>
+		</provider>
+	</providers>
+</liberatedClaude>`
+
+	_, err := Parse([]byte(xml))
+	require.Error(t, err, "a gateway with no usable provider cannot start")
+	assert.Contains(t, err.Error(), "NO_SUCH_KEY_AT_ALL", "the error should name the missing variable")
+	assert.Contains(t, err.Error(), "only", "the error should name the skipped provider")
 }
 
 func TestValidationErrors(t *testing.T) {

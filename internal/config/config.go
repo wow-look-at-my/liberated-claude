@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/wow-look-at-my/liberated-claude/internal/alias"
@@ -42,6 +43,17 @@ type Config struct {
 	Server    Server     `xml:"server"`
 	Bootstrap Bootstrap  `xml:"bootstrap"`
 	Providers []Provider `xml:"providers>provider"`
+
+	// Skipped lists providers dropped at load for missing credentials.
+	Skipped []SkippedProvider `xml:"-"`
+}
+
+// SkippedProvider is a provider dropped for unset ${VAR} references. Desktop
+// probes one model to validate the gateway, so advertising a keyless provider
+// fails setup for all of them.
+type SkippedProvider struct {
+	Name    string
+	Missing []string
 }
 
 // Server describes the local listener.
@@ -137,12 +149,10 @@ func (m *Model) DisplayName() string {
 // envRef matches ${NAME} references inside config text.
 var envRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
-// expandEnv substitutes ${NAME} from the environment.
-//
-// An unset variable is an error rather than an empty string: silently sending
-// an empty API key upstream produces a 401 whose cause is invisible from the
-// config file.
-func expandEnv(s string) (string, error) {
+// expandRefs substitutes ${NAME} from the environment, reporting the names
+// that were not set. An unset reference expands to empty and is never sent
+// upstream, because the caller drops whatever it belonged to.
+func expandRefs(s string) (string, []string) {
 	var missing []string
 	out := envRef.ReplaceAllStringFunc(s, func(ref string) string {
 		name := envRef.FindStringSubmatch(ref)[1]
@@ -153,10 +163,23 @@ func expandEnv(s string) (string, error) {
 		}
 		return val
 	})
-	if len(missing) > 0 {
-		return "", fmt.Errorf("unset environment variable(s): %s", strings.Join(missing, ", "))
+	return out, missing
+}
+
+// expandFields expands every field in place and returns the unset names, in
+// first-seen order and without repeats.
+func expandFields(fields []*string) []string {
+	var missing []string
+	for _, f := range fields {
+		v, names := expandRefs(*f)
+		*f = v
+		for _, n := range names {
+			if !slices.Contains(missing, n) {
+				missing = append(missing, n)
+			}
+		}
 	}
-	return out, nil
+	return missing
 }
 
 // Load reads and validates the config at path.
@@ -190,22 +213,30 @@ func Parse(raw []byte) (*Config, error) {
 }
 
 // expand resolves ${VAR} references in the fields that carry secrets or URLs.
+//
+// A missing server variable is fatal, since there is no gateway without it. A
+// missing provider variable only costs that provider, so it is dropped and
+// recorded in Skipped for the caller to log.
 func (c *Config) expand() error {
-	fields := []*string{&c.Server.APIKey, &c.Server.Listen, &c.Server.PublicURL}
+	server := []*string{&c.Server.APIKey, &c.Server.Listen, &c.Server.PublicURL}
+	if missing := expandFields(server); len(missing) > 0 {
+		return fmt.Errorf("unset environment variable(s): %s", strings.Join(missing, ", "))
+	}
+
+	var kept []Provider
 	for i := range c.Providers {
-		p := &c.Providers[i]
-		fields = append(fields, &p.APIKey, &p.BaseURL)
+		p := c.Providers[i]
+		fields := []*string{&p.APIKey, &p.BaseURL}
 		for j := range p.Headers {
 			fields = append(fields, &p.Headers[j].Value)
 		}
-	}
-	for _, f := range fields {
-		v, err := expandEnv(*f)
-		if err != nil {
-			return err
+		if missing := expandFields(fields); len(missing) > 0 {
+			c.Skipped = append(c.Skipped, SkippedProvider{Name: p.Name, Missing: missing})
+			continue
 		}
-		*f = v
+		kept = append(kept, p)
 	}
+	c.Providers = kept
 	return nil
 }
 
@@ -217,6 +248,10 @@ func (c *Config) validate() error {
 		return fmt.Errorf("server.listen is required")
 	}
 	if len(c.Providers) == 0 {
+		if len(c.Skipped) > 0 {
+			return fmt.Errorf("every provider was skipped for missing credentials: %s",
+				strings.Join(c.SkippedSummary(), "; "))
+		}
 		return fmt.Errorf("at least one provider is required")
 	}
 	seenAlias := map[string]string{}
@@ -281,6 +316,15 @@ func validateModel(p *Provider, m *Model, idx int, seenAlias map[string]string) 
 	}
 	seenAlias[a] = m.ID
 	return nil
+}
+
+// SkippedSummary describes each dropped provider as "name (VAR1, VAR2)".
+func (c *Config) SkippedSummary() []string {
+	out := make([]string, 0, len(c.Skipped))
+	for _, s := range c.Skipped {
+		out = append(out, fmt.Sprintf("%s (%s)", s.Name, strings.Join(s.Missing, ", ")))
+	}
+	return out
 }
 
 // Models returns every configured model, in document order.

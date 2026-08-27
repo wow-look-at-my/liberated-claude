@@ -94,7 +94,39 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("/.well-known/", handleWellKnown)
-	return s.authenticate(mux)
+	return s.logRequests(s.authenticate(mux))
+}
+
+// logRequests records every request with the status it got. Without this a
+// path no route matches is answered by the mux with a bare 404 that no handler
+// ever sees, so a client failure leaves no trace anywhere in this process.
+func (s *Server) logRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		if rec.status < http.StatusBadRequest {
+			return
+		}
+		s.log.Warn("request failed", "method", r.Method, "path", r.URL.Path, "status", rec.status)
+	})
+}
+
+// statusRecorder remembers the status written through it.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+// Flush keeps the wrapper transparent to the streaming path.
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // authenticate enforces the configured key.

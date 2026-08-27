@@ -74,8 +74,7 @@ type OAUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
-	// PromptTokensDetails carries the cache hit count on providers that
-	// implement automatic prefix caching.
+	// PromptTokensDetails carries cache hit counts (automatic prefix caching).
 	PromptTokensDetails *OAPromptTokensDetails `json:"prompt_tokens_details,omitempty"`
 	// CacheCreationInputTokens and CacheReadInputTokens: gateways' Anthropic accounting.
 	CacheCreationInputTokens *int `json:"cache_creation_input_tokens,omitempty"`

@@ -174,8 +174,7 @@ func reqAssistantMessage(msg wire.Message, mode config.CacheMode) (wire.OAMessag
 			out.Content = json.RawMessage(parts)
 		}
 	} else if len(textParts) > 0 {
-		// Has tool calls and text; emit parts array.
-		// Also force array form if any part has cache_control.
+		// Tool calls and text; emit parts array (forced if cache_control present).
 		parts, _ := json.Marshal(textParts)
 		out.Content = json.RawMessage(parts)
 	}

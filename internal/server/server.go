@@ -55,9 +55,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/models", s.handleModels)
 	mux.HandleFunc("POST /v1/messages", s.handleMessages)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	mux.HandleFunc("/.well-known/", handleWellKnown)
 	return s.authenticate(mux)
 }
 
@@ -70,7 +70,7 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		want := s.cfg.Server.APIKey
-		if want == "" || r.URL.Path == "/healthz" {
+		if want == "" || unauthenticatedPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -82,6 +82,28 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// unauthenticatedPath reports whether a path is served without a credential.
+//
+// Discovery probes must be exempt. Claude Desktop looks for RFC 8414 metadata
+// under /.well-known/ to decide whether the gateway acts as its own
+// authorization server, and it reads the status: a 401 there says an
+// authorization server exists and refused the request, which starts an SSO flow
+// this gateway does not implement. Answering 404 unauthenticated is what tells
+// it there is no SSO and the static API key is the whole story.
+func unauthenticatedPath(p string) bool {
+	return p == "/healthz" || strings.HasPrefix(p, "/.well-known/")
+}
+
+// handleWellKnown declines every discovery probe.
+//
+// The 404 is the signal, so it is returned for any well-known document rather
+// than only the OAuth one: an openid-configuration answered any other way would
+// start the same flow.
+func handleWellKnown(w http.ResponseWriter, _ *http.Request) {
+	writeError(w, http.StatusNotFound, "not_found_error",
+		"this gateway authenticates with a static API key and hosts no authorization server metadata")
 }
 
 // presentedKey pulls the credential out of whichever header carries it.

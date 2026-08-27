@@ -49,8 +49,8 @@ type Config struct {
 }
 
 // SkippedProvider is a provider dropped for unset ${VAR} references. Desktop
-// probes one model to validate the gateway, so advertising a keyless provider
-// fails setup for all of them.
+// probes one model to validate the gateway, so a keyless provider fails setup
+// for all of them.
 type SkippedProvider struct {
 	Name    string
 	Missing []string

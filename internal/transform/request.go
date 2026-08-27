@@ -68,6 +68,18 @@ func AnthropicToOpenAI(req *wire.MessagesRequest, m *config.Model) (*wire.OARequ
 				return nil, err
 			}
 			out.Messages = append(out.Messages, msgs...)
+		} else if msg.Role == "system" {
+			// Desktop sends system turns inline, not only as req.System.
+			text, err := reqSystemText(msg.Content, m.EffectiveCache())
+			if err != nil {
+				return nil, err
+			}
+			if text != "" {
+				out.Messages = append(out.Messages, wire.OAMessage{
+					Role:    "system",
+					Content: json.RawMessage([]byte(fmt.Sprintf("%q", text))),
+				})
+			}
 		} else {
 			return nil, fmt.Errorf("unknown message role: %q", msg.Role)
 		}

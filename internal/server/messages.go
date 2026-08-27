@@ -93,6 +93,8 @@ func (s *Server) proxyOpenAI(
 ) {
 	oaReq, err := transform.AnthropicToOpenAI(req, m)
 	if err != nil {
+		// Our own 400, so relayUpstreamError never sees it.
+		s.log.Error("request translation failed", "model", m.ID, "error", err)
 		writeError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}

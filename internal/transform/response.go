@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/wow-look-at-my/liberated-claude/internal/wire"
 )
@@ -201,15 +202,19 @@ func StreamOpenAIToAnthropic(dst io.Writer, src io.Reader, advertisedModel strin
 	// Content block indices are sequential across the message.
 	nextIndex := 0
 
-	// Emit a message_start event to signal the start of streaming.
+	// message_start precedes the first upstream chunk, so the upstream ID is not
+	// known yet and one is synthesized. An empty id fails client validation.
+	messageID = "msg_" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	if err := streamEmit(dst, "message_start", map[string]interface{}{
 		"type": "message_start",
 		"message": map[string]interface{}{
-			"type":    "message",
-			"id":      messageID,
-			"role":    "assistant",
-			"model":   advertisedModel,
-			"content": []interface{}{},
+			"type":          "message",
+			"id":            messageID,
+			"role":          "assistant",
+			"model":         advertisedModel,
+			"content":       []interface{}{},
+			"stop_reason":   nil,
+			"stop_sequence": nil,
 			"usage": map[string]interface{}{
 				"input_tokens":  0,
 				"output_tokens": 0,
@@ -251,10 +256,6 @@ func StreamOpenAIToAnthropic(dst io.Writer, src io.Reader, advertisedModel strin
 			continue
 		}
 
-		if messageID == "" && oaResp.ID != "" {
-			messageID = oaResp.ID
-		}
-
 		choice := oaResp.Choices[0]
 		if choice.Delta == nil {
 			continue
@@ -271,7 +272,7 @@ func StreamOpenAIToAnthropic(dst io.Writer, src io.Reader, advertisedModel strin
 		if reasoning := delta.ReasoningText(); reasoning != "" {
 			if currentBlock == nil || currentBlock.typ != "thinking" {
 				if currentBlock != nil {
-					if err := streamEmit(dst, "content_block_stop", map[string]interface{}{}); err != nil {
+					if err := streamBlockStop(dst, currentBlock.index); err != nil {
 						return err
 					}
 				}
@@ -309,7 +310,7 @@ func StreamOpenAIToAnthropic(dst io.Writer, src io.Reader, advertisedModel strin
 		if text != "" {
 			if currentBlock == nil || currentBlock.typ != "text" {
 				if currentBlock != nil {
-					if err := streamEmit(dst, "content_block_stop", map[string]interface{}{}); err != nil {
+					if err := streamBlockStop(dst, currentBlock.index); err != nil {
 						return err
 					}
 				}
@@ -360,7 +361,7 @@ func StreamOpenAIToAnthropic(dst io.Writer, src io.Reader, advertisedModel strin
 			// Emit content_block_start on first chunk for this tool call.
 			if !toolCall.started {
 				if currentBlock != nil {
-					if err := streamEmit(dst, "content_block_stop", map[string]interface{}{}); err != nil {
+					if err := streamBlockStop(dst, currentBlock.index); err != nil {
 						return err
 					}
 				}
@@ -424,7 +425,7 @@ func StreamOpenAIToAnthropic(dst io.Writer, src io.Reader, advertisedModel strin
 
 	// Close the last content block.
 	if currentBlock != nil {
-		if err := streamEmit(dst, "content_block_stop", map[string]interface{}{}); err != nil {
+		if err := streamBlockStop(dst, currentBlock.index); err != nil {
 			return err
 		}
 	}
@@ -450,7 +451,9 @@ func StreamOpenAIToAnthropic(dst io.Writer, src io.Reader, advertisedModel strin
 	}
 
 	// Emit message_stop to signal end of stream.
-	if err := streamEmit(dst, "message_stop", map[string]interface{}{}); err != nil {
+	if err := streamEmit(dst, "message_stop", map[string]interface{}{
+		"type": "message_stop",
+	}); err != nil {
 		return err
 	}
 
@@ -459,6 +462,16 @@ func StreamOpenAIToAnthropic(dst io.Writer, src io.Reader, advertisedModel strin
 	}
 
 	return nil
+}
+
+// streamBlockStop closes the content block at index. A client dispatches on
+// the payload's type and matches the block by index, so an event carrying
+// neither leaves the block open and the message never finishes.
+func streamBlockStop(dst io.Writer, index int) error {
+	return streamEmit(dst, "content_block_stop", map[string]interface{}{
+		"type":  "content_block_stop",
+		"index": index,
+	})
 }
 
 // streamToolCall accumulates a tool call across chunks.

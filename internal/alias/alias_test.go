@@ -1,6 +1,9 @@
 package alias
 
-import "testing"
+import (
+	"github.com/stretchr/testify/assert"
+	"testing"
+)
 
 // Real upstream IDs that Desktop's screen rejects. Each names a model somebody
 // would plausibly want to route, which is why the encoding has to exist.
@@ -23,9 +26,8 @@ var rejectedUpstream = []string{
 
 func TestAcceptsRejectsForeignModels(t *testing.T) {
 	for _, id := range rejectedUpstream {
-		if Accepts(id) {
-			t.Errorf("Accepts(%q) = true, want false: Desktop would drop this ID", id)
-		}
+		assert.False(t, Accepts(id))
+
 	}
 }
 
@@ -41,9 +43,8 @@ func TestAcceptsAdmitsAnthropicIDs(t *testing.T) {
 		"anthropic.claude-3-5-sonnet",
 	}
 	for _, id := range accepted {
-		if !Accepts(id) {
-			t.Errorf("Accepts(%q) = false, want true", id)
-		}
+		assert.True(t, Accepts(id))
+
 	}
 }
 
@@ -53,12 +54,11 @@ func TestAcceptsAdmitsAnthropicIDs(t *testing.T) {
 func TestEncodeAlwaysAcceptedAndRoundTrips(t *testing.T) {
 	for _, id := range rejectedUpstream {
 		enc := Encode(id)
-		if !Accepts(enc) {
-			t.Errorf("Encode(%q) = %q, which Desktop still rejects", id, enc)
-		}
-		if got := Decode(enc); got != id {
-			t.Errorf("Decode(Encode(%q)) = %q, want %q", id, got, id)
-		}
+		assert.True(t, Accepts(enc))
+
+		got := Decode(enc)
+		assert.Equal(t, id, got)
+
 	}
 }
 
@@ -66,12 +66,8 @@ func TestEncodeAlwaysAcceptedAndRoundTrips(t *testing.T) {
 // stay readable in the picker.
 func TestEncodePassesThroughAcceptedIDs(t *testing.T) {
 	for _, id := range []string{"claude-opus-4", "claude-sonnet-4-5", "opus"} {
-		if got := Encode(id); got != id {
-			t.Errorf("Encode(%q) = %q, want unchanged", id, got)
-		}
-		if got := Decode(id); got != id {
-			t.Errorf("Decode(%q) = %q, want unchanged", id, got)
-		}
+		assert.Equal(t, id, Encode(id), "Encode must not touch %q", id)
+		assert.Equal(t, id, Decode(id), "Decode must not touch %q", id)
 	}
 }
 
@@ -79,9 +75,9 @@ func TestEncodePassesThroughAcceptedIDs(t *testing.T) {
 // so this holds structurally; the test pins it against a future encoding change.
 func TestEncodedFormContainsNoForeignToken(t *testing.T) {
 	for _, id := range rejectedUpstream {
-		if enc := Encode(id); ForeignTokens.MatchString(enc) {
-			t.Errorf("Encode(%q) = %q contains a foreign token", id, enc)
-		}
+		enc := Encode(id)
+		assert.False(t, ForeignTokens.MatchString(enc))
+
 	}
 }
 
@@ -89,9 +85,9 @@ func TestDecodeLeavesMalformedInputAlone(t *testing.T) {
 	// Odd length, non-hex body, and empty body are all unresolvable; each must
 	// come back untouched so the caller reports an unknown model.
 	for _, id := range []string{prefix + "abc", prefix + "zz", prefix} {
-		if got := Decode(id); got != id {
-			t.Errorf("Decode(%q) = %q, want unchanged", id, got)
-		}
+		got := Decode(id)
+		assert.Equal(t, id, got)
+
 	}
 }
 
@@ -109,22 +105,18 @@ func TestSplitOneM(t *testing.T) {
 	}
 	for _, c := range cases {
 		base, oneM := SplitOneM(c.in)
-		if base != c.wantBase || oneM != c.wantOneM {
-			t.Errorf("SplitOneM(%q) = (%q, %v), want (%q, %v)",
-				c.in, base, oneM, c.wantBase, c.wantOneM)
-		}
+		assert.Equal(t, c.wantBase, base, "base of %q", c.in)
+		assert.Equal(t, c.wantOneM, oneM, "oneM of %q", c.in)
 	}
 }
 
 func TestIsTier(t *testing.T) {
 	for _, s := range []string{"opus", "Sonnet", " haiku ", "fable", "mythos"} {
-		if !IsTier(s) {
-			t.Errorf("IsTier(%q) = false, want true", s)
-		}
+		assert.True(t, IsTier(s))
+
 	}
 	for _, s := range []string{"", "turbo", "opus-4"} {
-		if IsTier(s) {
-			t.Errorf("IsTier(%q) = true, want false", s)
-		}
+		assert.False(t, IsTier(s))
+
 	}
 }

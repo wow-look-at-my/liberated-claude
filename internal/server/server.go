@@ -26,6 +26,8 @@ type Server struct {
 
 	mu    sync.RWMutex
 	rates map[string]pricing.Rates
+	// noCountTokens names providers that answered the count probe with a refusal.
+	noCountTokens map[string]bool
 }
 
 // New builds a Server. rates is keyed by advertised model ID and may be nil,
@@ -39,11 +41,12 @@ func New(cfg *config.Config, client *http.Client, log *slog.Logger) *Server {
 		}
 	}
 	return &Server{
-		cfg:    cfg,
-		client: client,
-		log:    log,
-		gates:  gates,
-		rates:  map[string]pricing.Rates{},
+		cfg:           cfg,
+		client:        client,
+		log:           log,
+		gates:         gates,
+		rates:         map[string]pricing.Rates{},
+		noCountTokens: map[string]bool{},
 	}
 }
 
@@ -90,6 +93,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /bootstrap", s.handleBootstrap)
 	mux.HandleFunc("GET /v1/models", s.handleModels)
 	mux.HandleFunc("POST /v1/messages", s.handleMessages)
+	mux.HandleFunc("POST /v1/messages/count_tokens", s.handleCountTokens)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})

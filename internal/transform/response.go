@@ -199,6 +199,9 @@ func StreamOpenAIToAnthropic(dst io.Writer, src io.Reader, advertisedModel strin
 		index int
 	}
 	var currentBlock *blockState
+	// Content block indices are sequential across the whole message, whatever
+	// mix of thinking, text, and tool_use blocks it turns out to contain.
+	nextIndex := 0
 
 	// Emit a message_start event to signal the start of streaming.
 	if err := streamEmit(dst, "message_start", map[string]interface{}{
@@ -280,11 +283,12 @@ func StreamOpenAIToAnthropic(dst io.Writer, src io.Reader, advertisedModel strin
 						"type":     "thinking",
 						"thinking": "",
 					},
-					"index": 0,
+					"index": nextIndex,
 				}); err != nil {
 					return err
 				}
-				currentBlock = &blockState{typ: "thinking", index: 0}
+				currentBlock = &blockState{typ: "thinking", index: nextIndex}
+				nextIndex++
 			}
 
 			if err := streamEmit(dst, "content_block_delta", map[string]interface{}{
@@ -293,101 +297,49 @@ func StreamOpenAIToAnthropic(dst io.Writer, src io.Reader, advertisedModel strin
 					"type":     "thinking_delta",
 					"thinking": delta.ReasoningContent,
 				},
-				"index": 0,
+				"index": currentBlock.index,
 			}); err != nil {
 				return err
 			}
 		}
 
 		// Process text content.
-		if delta.Content != nil && len(delta.Content) > 0 {
-			// Parse Content (may be bare string or list).
-			var content interface{}
-			if err := json.Unmarshal(delta.Content, &content); err == nil {
-				if parts, ok := content.([]interface{}); ok {
-					for _, p := range parts {
-						if part, ok := p.(map[string]interface{}); ok {
-							if typ, ok := part["type"].(string); ok && typ == "text" {
-								if text, ok := part["text"].(string); ok && text != "" {
-									if currentBlock == nil || currentBlock.typ != "text" {
-										if currentBlock != nil {
-											if err := streamEmit(dst, "content_block_stop", map[string]interface{}{}); err != nil {
-												return err
-											}
-										}
-										blockIndex := len(toolCalls) + 1
-										if currentBlock != nil && currentBlock.typ == "thinking" {
-											blockIndex = 2
-										}
-										if err := streamEmit(dst, "content_block_start", map[string]interface{}{
-											"type": "content_block_start",
-											"content_block": map[string]interface{}{
-												"type": "text",
-												"text": "",
-											},
-											"index": blockIndex,
-										}); err != nil {
-											return err
-										}
-										currentBlock = &blockState{typ: "text", index: blockIndex}
-									}
-
-									if err := streamEmit(dst, "content_block_delta", map[string]interface{}{
-										"type": "content_block_delta",
-										"delta": map[string]interface{}{
-											"type": "text_delta",
-											"text": text,
-										},
-										"index": currentBlock.index,
-									}); err != nil {
-										return err
-									}
-									totalOutputTokens++
-								}
-							}
-						}
-					}
-				}
-			} else {
-				// Treat as bare string.
-				var text string
-				if err := json.Unmarshal(delta.Content, &text); err == nil && text != "" {
-					if currentBlock == nil || currentBlock.typ != "text" {
-						if currentBlock != nil {
-							if err := streamEmit(dst, "content_block_stop", map[string]interface{}{}); err != nil {
-								return err
-							}
-						}
-						blockIndex := 1
-						if currentBlock != nil && currentBlock.typ == "thinking" {
-							blockIndex = 2
-						}
-						if err := streamEmit(dst, "content_block_start", map[string]interface{}{
-							"type": "content_block_start",
-							"content_block": map[string]interface{}{
-								"type": "text",
-								"text": "",
-							},
-							"index": blockIndex,
-						}); err != nil {
-							return err
-						}
-						currentBlock = &blockState{typ: "text", index: blockIndex}
-					}
-
-					if err := streamEmit(dst, "content_block_delta", map[string]interface{}{
-						"type": "content_block_delta",
-						"delta": map[string]interface{}{
-							"type": "text_delta",
-							"text": text,
-						},
-						"index": currentBlock.index,
-					}); err != nil {
+		text, err := streamDeltaText(delta.Content)
+		if err != nil {
+			return err
+		}
+		if text != "" {
+			if currentBlock == nil || currentBlock.typ != "text" {
+				if currentBlock != nil {
+					if err := streamEmit(dst, "content_block_stop", map[string]interface{}{}); err != nil {
 						return err
 					}
-					totalOutputTokens++
 				}
+				if err := streamEmit(dst, "content_block_start", map[string]interface{}{
+					"type": "content_block_start",
+					"content_block": map[string]interface{}{
+						"type": "text",
+						"text": "",
+					},
+					"index": nextIndex,
+				}); err != nil {
+					return err
+				}
+				currentBlock = &blockState{typ: "text", index: nextIndex}
+				nextIndex++
 			}
+
+			if err := streamEmit(dst, "content_block_delta", map[string]interface{}{
+				"type": "content_block_delta",
+				"delta": map[string]interface{}{
+					"type": "text_delta",
+					"text": text,
+				},
+				"index": currentBlock.index,
+			}); err != nil {
+				return err
+			}
+			totalOutputTokens++
 		}
 
 		// Process tool calls.
@@ -415,7 +367,6 @@ func StreamOpenAIToAnthropic(dst io.Writer, src io.Reader, advertisedModel strin
 					}
 				}
 
-				blockIndex := len(toolCalls)
 				if err := streamEmit(dst, "content_block_start", map[string]interface{}{
 					"type": "content_block_start",
 					"content_block": map[string]interface{}{
@@ -424,11 +375,12 @@ func StreamOpenAIToAnthropic(dst io.Writer, src io.Reader, advertisedModel strin
 						"name":  tc.Function.Name,
 						"input": json.RawMessage("{}"),
 					},
-					"index": blockIndex,
+					"index": nextIndex,
 				}); err != nil {
 					return err
 				}
-				currentBlock = &blockState{typ: "tool_use", index: blockIndex}
+				currentBlock = &blockState{typ: "tool_use", index: nextIndex}
+				nextIndex++
 				toolCall.started = true
 			}
 
@@ -520,6 +472,50 @@ type streamToolCall struct {
 }
 
 // streamEmit writes an Anthropic SSE event to dst: event: <name>\ndata: <json>\n\n
+// streamDeltaText returns the text carried by a streaming delta's content.
+//
+// The field arrives either as a bare JSON string or as a list of typed parts.
+// Both decode cleanly into an interface value, so the decoded Go type decides
+// which form was sent; a failed decode would mean the payload is not JSON at
+// all, which is an error rather than a hint about the shape.
+func streamDeltaText(raw json.RawMessage) (string, error) {
+	if len(raw) == 0 {
+		return "", nil
+	}
+	var decoded interface{}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return "", fmt.Errorf("decode delta content: %w", err)
+	}
+	switch v := decoded.(type) {
+	case nil:
+		return "", nil
+	case string:
+		return v, nil
+	case []interface{}:
+		return streamPartsText(v), nil
+	default:
+		return "", fmt.Errorf("delta content has unexpected type %T", decoded)
+	}
+}
+
+// streamPartsText concatenates the text of every text part in a content list.
+func streamPartsText(parts []interface{}) string {
+	var b strings.Builder
+	for _, p := range parts {
+		part, ok := p.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if typ, _ := part["type"].(string); typ != "text" {
+			continue
+		}
+		if s, ok := part["text"].(string); ok {
+			b.WriteString(s)
+		}
+	}
+	return b.String()
+}
+
 func streamEmit(dst io.Writer, eventName string, data interface{}) error {
 	// Marshal data to JSON.
 	payload, err := json.Marshal(data)

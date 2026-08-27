@@ -533,6 +533,7 @@ func TestParseExampleXML(t *testing.T) {
 	t.Setenv("LIBERATED_CLAUDE_KEY", "test-gateway-key")
 	t.Setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
 	t.Setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+	t.Setenv("OLLAMA_API_KEY", "test-ollama-key")
 
 	c, err := Parse(rawXML)
 	require.NoError(t, err, "config.example.xml should parse and validate cleanly")

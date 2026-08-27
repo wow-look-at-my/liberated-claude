@@ -168,17 +168,21 @@ func TestFetchOpenRouterHappyPath(t *testing.T) {
 	assert.Equal(t, 2, len(result), "should return two models")
 
 	// Verify per-token to per-Mtok conversion: 0.000000075 * 1e6 = 0.075
+	// Scaling by 1e6 is not exact in binary floating point, so the rates are
+	// compared within a tolerance far tighter than any price difference.
+	const tol = 1e-12
+
 	glm := result["z-ai/glm-5.3-flash"]
-	assert.Equal(t, 0.075, glm.InputPerMtok, "input rate should convert correctly")
-	assert.Equal(t, 0.25, glm.OutputPerMtok, "output rate should convert correctly")
-	assert.Equal(t, 0.015, glm.CacheReadPerMtok, "cache read rate should convert correctly")
-	assert.Equal(t, 0.1, glm.CacheWritePerMtok, "cache write rate should convert correctly")
+	assert.InDelta(t, 0.075, glm.InputPerMtok, tol, "input rate should convert correctly")
+	assert.InDelta(t, 0.25, glm.OutputPerMtok, tol, "output rate should convert correctly")
+	assert.InDelta(t, 0.015, glm.CacheReadPerMtok, tol, "cache read rate should convert correctly")
+	assert.InDelta(t, 0.1, glm.CacheWritePerMtok, tol, "cache write rate should convert correctly")
 
 	deepseek := result["deepseek/deepseek-v4-flash-0731"]
-	assert.Equal(t, 0.01, deepseek.InputPerMtok, "input rate should convert correctly")
-	assert.Equal(t, 0.05, deepseek.OutputPerMtok, "output rate should convert correctly")
-	assert.Equal(t, 0.002, deepseek.CacheReadPerMtok, "cache read rate should convert correctly")
-	assert.Equal(t, 0.01, deepseek.CacheWritePerMtok, "cache write rate should convert correctly")
+	assert.InDelta(t, 0.01, deepseek.InputPerMtok, tol, "input rate should convert correctly")
+	assert.InDelta(t, 0.05, deepseek.OutputPerMtok, tol, "output rate should convert correctly")
+	assert.InDelta(t, 0.002, deepseek.CacheReadPerMtok, tol, "cache read rate should convert correctly")
+	assert.InDelta(t, 0.01, deepseek.CacheWritePerMtok, tol, "cache write rate should convert correctly")
 }
 
 func TestFetchOpenRouterMissingCacheWrite(t *testing.T) {
@@ -207,7 +211,7 @@ func TestFetchOpenRouterMissingCacheWrite(t *testing.T) {
 	assert.Equal(t, 0.01, rates.InputPerMtok, "input rate should convert correctly")
 	assert.Equal(t, 0.02, rates.OutputPerMtok, "output rate should convert correctly")
 	assert.Equal(t, 0.003, rates.CacheReadPerMtok, "cache read rate should convert correctly")
-	assert.Equal(t, 0, rates.CacheWritePerMtok, "missing cache write should default to 0")
+	assert.Equal(t, float64(0), rates.CacheWritePerMtok, "missing cache write should default to 0")
 }
 
 func TestFetchOpenRouterNegativePrice(t *testing.T) {
@@ -235,9 +239,9 @@ func TestFetchOpenRouterNegativePrice(t *testing.T) {
 
 	rates := result["model-with-negative"]
 	assert.Equal(t, 0.01, rates.InputPerMtok, "input rate should convert correctly")
-	assert.Equal(t, 0, rates.OutputPerMtok, "negative price should be treated as 0")
+	assert.Equal(t, float64(0), rates.OutputPerMtok, "negative price should be treated as 0")
 	assert.Equal(t, 0.002, rates.CacheReadPerMtok, "cache read rate should convert correctly")
-	assert.Equal(t, 0, rates.CacheWritePerMtok, "zero should remain zero")
+	assert.Equal(t, float64(0), rates.CacheWritePerMtok, "zero should remain zero")
 }
 
 func TestFetchOpenRouterUnparseable(t *testing.T) {
@@ -264,10 +268,10 @@ func TestFetchOpenRouterUnparseable(t *testing.T) {
 	require.NoError(t, err, "FetchOpenRouter should succeed with unparseable prices")
 
 	rates := result["model-with-unparseable"]
-	assert.Equal(t, 0, rates.InputPerMtok, "unparseable price should be treated as 0")
-	assert.Equal(t, 0.05, rates.OutputPerMtok, "valid price should still be parsed")
-	assert.Equal(t, 0, rates.CacheReadPerMtok, "unparseable cache read should be treated as 0")
-	assert.Equal(t, 0.1, rates.CacheWritePerMtok, "valid cache write should still be parsed")
+	assert.Equal(t, float64(0), rates.InputPerMtok, "unparseable price should be treated as 0")
+	assert.InDelta(t, 0.05, rates.OutputPerMtok, 1e-12, "valid price should still be parsed")
+	assert.Equal(t, float64(0), rates.CacheReadPerMtok, "unparseable cache read should be treated as 0")
+	assert.InDelta(t, 0.1, rates.CacheWritePerMtok, 1e-12, "valid cache write should still be parsed")
 }
 
 func TestFetchOpenRouterNon200(t *testing.T) {
@@ -399,7 +403,7 @@ func TestMergeOverridePrecedence(t *testing.T) {
 	assert.Equal(t, 0.1, result["model-b"].OutputPerMtok, "detected should be used for model-b output")
 
 	// model-c should be from override
-	assert.Equal(t, 1, result["model-c"].InputPerMtok, "override-only model should be present")
+	assert.Equal(t, float64(1), result["model-c"].InputPerMtok, "override-only model should be present")
 
 	assert.Equal(t, 3, len(result), "result should have all three models")
 }

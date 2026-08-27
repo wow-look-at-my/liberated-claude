@@ -123,8 +123,7 @@ func (m *Model) EffectiveCache() CacheMode {
 // SupportsOneM reports whether Desktop should offer a 1M-context variant.
 func (m *Model) SupportsOneM() bool { return m.ContextWindow >= OneMThreshold }
 
-// AliasID is the model ID advertised to Desktop, which may differ from the
-// upstream ID when the real one would be rejected by the model screen.
+// AliasID is the advertised model ID (encoded if upstream would be rejected).
 func (m *Model) AliasID() string { return alias.Encode(m.ID) }
 
 // DisplayName is the picker label, falling back to the upstream ID.
@@ -275,8 +274,7 @@ func validateModel(p *Provider, m *Model, idx int, seenAlias map[string]string) 
 	default:
 		return fmt.Errorf("provider %q model %q: unknown cache mode %q", p.Name, m.ID, m.Cache)
 	}
-	// Two models sharing an advertised ID would make routing ambiguous, and the
-	// second would silently shadow the first in the picker.
+	// Shared advertised IDs make routing ambiguous (second shadows first).
 	a := m.AliasID()
 	if prev, dup := seenAlias[a]; dup {
 		return fmt.Errorf("model %q collides with %q: both advertise ID %q", m.ID, prev, a)

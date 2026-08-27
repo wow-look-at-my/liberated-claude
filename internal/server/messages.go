@@ -13,9 +13,7 @@ import (
 	"github.com/wow-look-at-my/liberated-claude/internal/wire"
 )
 
-// maxRequestBytes bounds a single Messages request. A 1M-token conversation is
-// large but bounded; this leaves generous headroom while refusing a body that
-// could only be a mistake or an attack.
+// maxRequestBytes bounds a Messages request (generous headroom against attacks).
 const maxRequestBytes = 256 << 20
 
 // handleMessages proxies a Messages API call to the provider serving the
@@ -139,8 +137,7 @@ func (s *Server) streamOpenAI(w http.ResponseWriter, resp *http.Response, advert
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 	if err := transform.StreamOpenAIToAnthropic(w, resp.Body, advertised); err != nil {
-		// The status line and part of the stream are already sent, so the only
-		// way to surface this is in the log and by ending the stream.
+		// Status and stream already sent; only recourse is logging and ending stream.
 		s.log.Error("stream translation failed", "error", err, "model", advertised)
 	}
 }

@@ -19,8 +19,7 @@ import (
 	"github.com/wow-look-at-my/liberated-claude/internal/server"
 )
 
-// upstreamTimeout bounds a single proxied call. Long-context requests against a
-// slow provider legitimately take minutes, so this is generous.
+// upstreamTimeout bounds a proxied call (generous for long-context/slow providers).
 const upstreamTimeout = 30 * time.Minute
 
 // discoveryTimeout bounds the startup pricing fetch.
@@ -138,8 +137,7 @@ func fetchProviderRates(
 	case strings.Contains(host, "ollama.com"):
 		return pricing.FetchOllamaCloud(ctx, client, p.BaseURL)
 	default:
-		// Anthropic and most OpenAI-compatible endpoints publish no machine
-		// readable price list, so there is nothing to detect.
+		// Anthropic and most OpenAI-compatible endpoints publish no price list.
 		return nil, nil
 	}
 }

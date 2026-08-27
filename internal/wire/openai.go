@@ -3,11 +3,7 @@ package wire
 import "encoding/json"
 
 // OAContentPart is one part of a multimodal OpenAI message.
-//
-// CacheControl is not part of the OpenAI specification. It is included because
-// OpenRouter and several other gateways accept Anthropic-style cache_control on
-// a content part and translate it upstream; providers configured for implicit
-// or disabled caching never have it set.
+// CacheControl (non-standard) allows cache_control translation by some gateways.
 type OAContentPart struct {
 	Type         string          `json:"type"`
 	Text         string          `json:"text,omitempty"`
@@ -15,9 +11,7 @@ type OAContentPart struct {
 	CacheControl *CacheControl   `json:"cache_control,omitempty"`
 }
 
-// OAMessage is one OpenAI chat message. Content is raw because the API accepts
-// both a bare string and a list of parts, and some providers reject the list
-// form for simple text.
+// OAMessage is one OpenAI chat message (Content raw: API accepts string or parts).
 type OAMessage struct {
 	Role       string          `json:"role"`
 	Content    json.RawMessage `json:"content,omitempty"`
@@ -36,9 +30,7 @@ type OAToolCall struct {
 	Function OAFunctionCall `json:"function"`
 }
 
-// OAFunctionCall is the name and JSON arguments of a tool call. Arguments is a
-// string because the OpenAI API encodes the argument object as JSON text, and
-// streams it in fragments that are only valid JSON once concatenated.
+// OAFunctionCall holds function name and JSON arguments (string for streaming).
 type OAFunctionCall struct {
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
@@ -68,8 +60,7 @@ type OARequest struct {
 	Stop        []string        `json:"stop,omitempty"`
 	Tools       []OATool        `json:"tools,omitempty"`
 	ToolChoice  json.RawMessage `json:"tool_choice,omitempty"`
-	// StreamOptions asks for a final usage chunk while streaming. Without it
-	// most providers omit usage entirely, which would erase cache accounting.
+	// StreamOptions asks for final usage chunk while streaming (prevents cache loss).
 	StreamOptions *OAStreamOptions `json:"stream_options,omitempty"`
 }
 

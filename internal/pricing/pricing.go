@@ -62,12 +62,12 @@ func FetchOpenRouter(ctx context.Context, client *http.Client, baseURL string) (
 
 	var envelope struct {
 		Data []struct {
-			ID       string `json:"id"`
-			Pricing  struct {
-				Prompt            string `json:"prompt"`
-				Completion        string `json:"completion"`
-				InputCacheRead    string `json:"input_cache_read"`
-				InputCacheWrite   string `json:"input_cache_write"`
+			ID      string `json:"id"`
+			Pricing struct {
+				Prompt          string `json:"prompt"`
+				Completion      string `json:"completion"`
+				InputCacheRead  string `json:"input_cache_read"`
+				InputCacheWrite string `json:"input_cache_write"`
 			} `json:"pricing"`
 		} `json:"data"`
 	}

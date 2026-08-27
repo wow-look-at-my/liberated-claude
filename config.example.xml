@@ -29,6 +29,59 @@
 
 	<providers>
 		<!--
+		  Ollama Cloud speaks the OpenAI Chat Completions API at /v1. It reuses
+		  KV cache across requests that share a prefix without being asked to,
+		  so cache="implicit": no cache directive is sent, and any cache hit the
+		  provider reports is passed back to Desktop as cache_read_input_tokens.
+
+		  contextWindow values are the context_length each model reports from
+		  https://ollama.com/api/show. Ollama Cloud publishes no per-token
+		  price list, so cost detection yields zero rates for these rather than
+		  a fabricated number.
+		-->
+		<provider name="ollama-cloud" kind="openai" cache="implicit">
+			<baseURL>https://ollama.com/v1</baseURL>
+			<apiKey>${OLLAMA_API_KEY}</apiKey>
+			<models>
+				<model id="glm-5.3-flash"
+				       label="GLM 5.3 Flash"
+				       tier="opus"
+				       tierDefault="true"
+				       contextWindow="1048576"
+				       maxOutputTokens="131072"/>
+				<model id="deepseek-v4-flash:0731"
+				       label="DeepSeek V4 Flash 0731"
+				       tier="sonnet"
+				       tierDefault="true"
+				       contextWindow="1048576"
+				       maxOutputTokens="131072"/>
+				<model id="deepseek-v4-pro:0813"
+				       label="DeepSeek V4 Pro 0813"
+				       tier="mythos"
+				       tierDefault="true"
+				       contextWindow="1048576"
+				       maxOutputTokens="131072"/>
+				<model id="kimi-k3"
+				       label="Kimi K3"
+				       tier="haiku"
+				       tierDefault="true"
+				       contextWindow="1048576"
+				       maxOutputTokens="131072"/>
+				<model id="glm-5.2"
+				       label="GLM 5.2"
+				       tier="opus"
+				       contextWindow="1048576"
+				       maxOutputTokens="131072"/>
+				<model id="minimax-m3"
+				       label="MiniMax M3"
+				       tier="fable"
+				       tierDefault="true"
+				       contextWindow="524288"
+				       maxOutputTokens="65536"/>
+			</models>
+		</provider>
+
+		<!--
 		  cache="explicit": the provider honors Anthropic cache_control blocks,
 		  which are forwarded untouched.
 		-->
@@ -72,16 +125,19 @@
 				  1310720 tokens: more than six times the 200000 a router that
 				  clamps every model to Anthropic's ceiling would offer.
 				-->
+				<!--
+				  These duplicate the Ollama Cloud entries above at a different
+				  vendor, so they do not claim tierDefault: only one model per
+				  tier should, or the alias resolves ambiguously.
+				-->
 				<model id="z-ai/glm-5.3-flash"
-				       label="GLM 5.3 Flash"
+				       label="GLM 5.3 Flash (OpenRouter)"
 				       tier="opus"
-				       tierDefault="true"
 				       contextWindow="1310720"
 				       maxOutputTokens="131072"/>
 				<model id="deepseek/deepseek-v4-flash-0731"
-				       label="DeepSeek V4 Flash 0731"
+				       label="DeepSeek V4 Flash 0731 (OpenRouter)"
 				       tier="sonnet"
-				       tierDefault="true"
 				       contextWindow="1310720"
 				       maxOutputTokens="943718"/>
 				<model id="z-ai/glm-5.3"

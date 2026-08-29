@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -143,6 +144,32 @@ func TestBootstrapCarriesGatewayAndPricing(t *testing.T) {
 	row := rows[0].(map[string]any)
 	assert.InDelta(t, 0.075, row["inputPerMtok"], 1e-12, "detected input rate should carry through")
 	assert.InDelta(t, 0.25, row["outputPerMtok"], 1e-12, "detected output rate should carry through")
+
+	_, hasAnalysis := doc["chatAdvancedFileAnalysisEnabled"]
+	assert.False(t, hasAnalysis, "an unset toggle should be omitted so the app keeps its own default")
+	_, hasToolSearch := doc["toolSearchEnabled"]
+	assert.False(t, hasToolSearch, "an unset toggle should be omitted so the app keeps its own default")
+}
+
+func TestBootstrapCarriesChatSurfaceToggles(t *testing.T) {
+	xml := strings.Replace(testConfigXML,
+		"<preferOneMContext>true</preferOneMContext>",
+		"<chatTabEnabled>true</chatTabEnabled>"+
+			"<chatAdvancedFileAnalysisEnabled>true</chatAdvancedFileAnalysisEnabled>"+
+			"<toolSearchEnabled>true</toolSearchEnabled>", 1)
+	cfg, err := config.Parse([]byte(xml))
+	require.NoError(t, err, "config with chat surface toggles should parse")
+
+	s := New(cfg, http.DefaultClient, slog.New(slog.DiscardHandler))
+	rec := do(t, s.Handler(), http.MethodGet, "/bootstrap", testKey)
+	require.Equal(t, http.StatusOK, rec.Code, "bootstrap should succeed")
+
+	var doc map[string]any
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&doc), "bootstrap body should decode")
+
+	assert.Equal(t, true, doc["chatTabEnabled"], "chatTabEnabled should map through")
+	assert.Equal(t, true, doc["chatAdvancedFileAnalysisEnabled"], "advanced file analysis should map through under its flat key")
+	assert.Equal(t, true, doc["toolSearchEnabled"], "tool search should map through")
 }
 
 // A model whose rate is out of Claude Desktop's accepted range would invalidate

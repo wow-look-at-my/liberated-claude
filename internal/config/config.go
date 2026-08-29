@@ -71,8 +71,10 @@ type Server struct {
 type Bootstrap struct {
 	DeploymentDisplayName string `xml:"deploymentDisplayName"`
 	ChatTabEnabled        *bool  `xml:"chatTabEnabled"`
-	AutoModeEnabled       *bool  `xml:"autoModeEnabled"`
-	ToolSearchEnabled     *bool  `xml:"toolSearchEnabled"`
+	// ChatAdvancedFileAnalysisEnabled also needs chatTabEnabled and the Bash tool.
+	ChatAdvancedFileAnalysisEnabled *bool `xml:"chatAdvancedFileAnalysisEnabled"`
+	AutoModeEnabled                 *bool `xml:"autoModeEnabled"`
+	ToolSearchEnabled               *bool `xml:"toolSearchEnabled"`
 	// PreferOneMContext picks the 1M variant by default (maps to modelPrefer1mContext).
 	PreferOneMContext *bool `xml:"preferOneMContext"`
 	// DisableTelemetry sets both telemetry keys the app understands.

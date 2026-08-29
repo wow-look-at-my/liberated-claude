@@ -51,6 +51,7 @@ func (s *Server) bootstrapConfig() map[string]any {
 		out["deploymentDisplayName"] = b.DeploymentDisplayName
 	}
 	setBool(out, "chatTabEnabled", b.ChatTabEnabled)
+	setBool(out, "chatAdvancedFileAnalysisEnabled", b.ChatAdvancedFileAnalysisEnabled)
 	setBool(out, "autoModeEnabled", b.AutoModeEnabled)
 	setBool(out, "toolSearchEnabled", b.ToolSearchEnabled)
 	setBool(out, "modelPrefer1mContext", b.PreferOneMContext)

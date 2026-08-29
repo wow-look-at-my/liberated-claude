@@ -21,6 +21,7 @@
 	<bootstrap>
 		<deploymentDisplayName>Liberated Claude</deploymentDisplayName>
 		<chatTabEnabled>true</chatTabEnabled>
+		<chatAdvancedFileAnalysisEnabled>true</chatAdvancedFileAnalysisEnabled>
 		<autoModeEnabled>true</autoModeEnabled>
 		<toolSearchEnabled>true</toolSearchEnabled>
 		<preferOneMContext>true</preferOneMContext>

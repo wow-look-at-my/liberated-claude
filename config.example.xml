@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copy to config.xml and edit. ${VAR} is read from the environment at load;
+  an unset variable is a startup error rather than an empty key.
+
+  contextWindow is the attribute that matters most. It is advertised to Claude
+  Desktop verbatim as max_input_tokens, and Desktop offers a 1M-context variant
+  for any model at or above 1000000. Put the model's real capacity here.
+
+  tier is required on every model. Claude Desktop discards any discovered model
+  that neither carries a recognized tier (sonnet, opus, haiku, fable, mythos)
+  nor has an Anthropic-looking ID.
+-->
+<liberatedClaude>
+	<server>
+		<listen>127.0.0.1:8787</listen>
+		<publicURL>http://127.0.0.1:8787</publicURL>
+		<apiKey>${LIBERATED_CLAUDE_KEY}</apiKey>
+	</server>
+
+	<bootstrap>
+		<deploymentDisplayName>Liberated Claude</deploymentDisplayName>
+		<chatTabEnabled>true</chatTabEnabled>
+		<autoModeEnabled>true</autoModeEnabled>
+		<toolSearchEnabled>true</toolSearchEnabled>
+		<preferOneMContext>true</preferOneMContext>
+		<disableTelemetry>true</disableTelemetry>
+	</bootstrap>
+
+	<providers>
+		<!--
+		  Ollama Cloud speaks the OpenAI Chat Completions API at /v1. It reuses
+		  KV cache across requests that share a prefix without being asked to,
+		  so cache="implicit": no cache directive is sent, and any cache hit the
+		  provider reports is passed back to Desktop as cache_read_input_tokens.
+
+		  contextWindow values are the context_length each model reports from
+		  https://ollama.com/api/show. Ollama Cloud publishes no per-token
+		  price list, so cost detection yields zero rates for these rather than
+		  a fabricated number.
+		-->
+		<provider name="ollama-cloud" kind="openai" cache="implicit">
+			<baseURL>https://ollama.com/v1</baseURL>
+			<apiKey>${OLLAMA_API_KEY}</apiKey>
+			<models>
+				<model id="glm-5.3-flash"
+				       label="GLM 5.3 Flash"
+				       tier="opus"
+				       tierDefault="true"
+				       contextWindow="1048576"
+				       maxOutputTokens="131072"/>
+				<model id="deepseek-v4-flash:0731"
+				       label="DeepSeek V4 Flash 0731"
+				       tier="sonnet"
+				       tierDefault="true"
+				       contextWindow="1048576"
+				       maxOutputTokens="131072"/>
+				<model id="deepseek-v4-pro:0813"
+				       label="DeepSeek V4 Pro 0813"
+				       tier="mythos"
+				       tierDefault="true"
+				       contextWindow="1048576"
+				       maxOutputTokens="131072"/>
+				<model id="kimi-k3"
+				       label="Kimi K3"
+				       tier="haiku"
+				       tierDefault="true"
+				       contextWindow="1048576"
+				       maxOutputTokens="131072"/>
+				<model id="glm-5.2"
+				       label="GLM 5.2"
+				       tier="opus"
+				       contextWindow="1048576"
+				       maxOutputTokens="131072"/>
+				<model id="minimax-m3"
+				       label="MiniMax M3"
+				       tier="fable"
+				       tierDefault="true"
+				       contextWindow="524288"
+				       maxOutputTokens="65536"/>
+			</models>
+		</provider>
+
+		<!--
+		  cache="explicit": the provider honors Anthropic cache_control blocks,
+		  which are forwarded untouched.
+		-->
+		<provider name="anthropic" kind="anthropic" cache="explicit">
+			<baseURL>https://api.anthropic.com</baseURL>
+			<apiKey>${ANTHROPIC_API_KEY}</apiKey>
+			<models>
+				<!--
+				  Only one model per tier should carry tierDefault; the
+				  OpenRouter entries below claim the defaults, so these do not.
+				-->
+				<model id="claude-opus-5"
+				       label="Claude Opus 5"
+				       tier="opus"
+				       contextWindow="1000000"
+				       maxOutputTokens="128000"/>
+				<model id="claude-sonnet-5"
+				       label="Claude Sonnet 5"
+				       tier="sonnet"
+				       contextWindow="1000000"
+				       maxOutputTokens="128000"/>
+			</models>
+		</provider>
+
+		<!--
+		  cache="implicit": the provider caches long prefixes on its own. No
+		  cache directive is sent upstream; hits are read back from the usage
+		  block and reported to Desktop as cache_read_input_tokens.
+		-->
+		<provider name="openrouter" kind="openai" cache="implicit">
+			<baseURL>https://openrouter.ai/api/v1</baseURL>
+			<apiKey>${OPENROUTER_API_KEY}</apiKey>
+			<headers>
+				<header name="HTTP-Referer">https://github.com/wow-look-at-my/liberated-claude</header>
+				<header name="X-Title">Liberated Claude</header>
+			</headers>
+			<models>
+				<!--
+				  contextWindow values below are OpenRouter's published
+				  context_length for each model. The two flash models carry
+				  1310720 tokens: more than six times the 200000 a router that
+				  clamps every model to Anthropic's ceiling would offer.
+				-->
+				<!--
+				  These duplicate the Ollama Cloud entries above at a different
+				  vendor, so they do not claim tierDefault: only one model per
+				  tier should, or the alias resolves ambiguously.
+				-->
+				<model id="z-ai/glm-5.3-flash"
+				       label="GLM 5.3 Flash (OpenRouter)"
+				       tier="opus"
+				       contextWindow="1310720"
+				       maxOutputTokens="131072"/>
+				<model id="deepseek/deepseek-v4-flash-0731"
+				       label="DeepSeek V4 Flash 0731 (OpenRouter)"
+				       tier="sonnet"
+				       contextWindow="1310720"
+				       maxOutputTokens="943718"/>
+				<model id="z-ai/glm-5.3"
+				       label="GLM 5.3"
+				       tier="opus"
+				       contextWindow="1048576"
+				       maxOutputTokens="131072"/>
+				<model id="deepseek/deepseek-v4-pro-0813"
+				       label="DeepSeek V4 Pro 0813"
+				       tier="mythos"
+				       tierDefault="true"
+				       contextWindow="1048576"
+				       maxOutputTokens="943717"/>
+				<model id="moonshotai/kimi-k3"
+				       label="Kimi K3"
+				       tier="haiku"
+				       tierDefault="true"
+				       contextWindow="1048576"
+				       maxOutputTokens="943718"/>
+			</models>
+		</provider>
+	</providers>
+</liberatedClaude>

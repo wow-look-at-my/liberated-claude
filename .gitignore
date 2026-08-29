@@ -1,0 +1,9 @@
+/liberated-claude
+/dist/
+/coverage.out
+/profile.json
+config.xml
+/build/
+build_output.txt
+*.output
+/logs/

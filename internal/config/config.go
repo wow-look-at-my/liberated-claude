@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"slices"
 	"strings"
 
+	"github.com/wow-look-at-my/go-containers/set"
 	"github.com/wow-look-at-my/liberated-claude/internal/alias"
 )
 
@@ -181,11 +181,12 @@ func expandRefs(s string) (string, []string) {
 // first-seen order and without repeats.
 func expandFields(fields []*string) []string {
 	var missing []string
+	seen := set.New[string]()
 	for _, f := range fields {
 		v, names := expandRefs(*f)
 		*f = v
 		for _, n := range names {
-			if !slices.Contains(missing, n) {
+			if seen.Add(n) {
 				missing = append(missing, n)
 			}
 		}

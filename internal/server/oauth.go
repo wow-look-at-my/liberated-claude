@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
 )
@@ -59,8 +58,8 @@ func (c *codeStore) take(code string) (authCode, bool) {
 // handleAuthServerMetadata answers the RFC 8414 probe Claude Desktop makes when
 // inferenceGatewayOidc is unset, which is the gateway-as-authorization-server
 // path. Returning 404 here leaves the sign-in screen with nowhere to go.
-func (s *Server) handleAuthServerMetadata(w http.ResponseWriter, _ *http.Request) {
-	base := strings.TrimSuffix(s.cfg.Server.PublicURL, "/")
+func (s *Server) handleAuthServerMetadata(w http.ResponseWriter, r *http.Request) {
+	base := requestOrigin(r)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issuer":                                base,
 		"authorization_endpoint":                base + "/oauth/authorize",
@@ -170,6 +169,17 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		"token_type":   "Bearer",
 		"expires_in":   int((365 * 24 * time.Hour).Seconds()),
 	})
+}
+
+// requestOrigin echoes back the origin the client dialled. The app requires the
+// metadata to be same-origin with inferenceGatewayBaseUrl, and localhost and
+// 127.0.0.1 are different origins.
+func requestOrigin(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
 }
 
 // isLoopbackRedirect reports whether the sign-in callback stays on this machine.

@@ -86,17 +86,27 @@ func TestDiscoveryProbesNeedNoCredential(t *testing.T) {
 	}
 }
 
-func TestAuthServerMetadataPointsAtThisGateway(t *testing.T) {
-	rec := do(t, newTestServer(t), http.MethodGet, "/.well-known/oauth-authorization-server", "")
-	require.Equal(t, http.StatusOK, rec.Code, "metadata should be served")
+// Claude Desktop refuses metadata whose issuer or endpoints are not same-origin
+// with inferenceGatewayBaseUrl, and localhost and 127.0.0.1 are different
+// origins, so the document has to echo the host the client dialled.
+func TestAuthServerMetadataIsSameOriginAsTheRequest(t *testing.T) {
+	h := newTestServer(t)
+	for _, host := range []string{"localhost:8787", "127.0.0.1:8787"} {
+		req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil)
+		req.Host = host
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code, "metadata should be served for %s", host)
 
-	var doc map[string]any
-	require.NoError(t, json.NewDecoder(rec.Body).Decode(&doc), "metadata should decode")
+		var doc map[string]any
+		require.NoError(t, json.NewDecoder(rec.Body).Decode(&doc), "metadata should decode")
 
-	assert.Equal(t, "http://127.0.0.1:8787", doc["issuer"], "issuer should be the gateway base URL")
-	assert.Equal(t, "http://127.0.0.1:8787/oauth/authorize", doc["authorization_endpoint"], "authorize endpoint should be absolute")
-	assert.Equal(t, "http://127.0.0.1:8787/oauth/token", doc["token_endpoint"], "token endpoint should be absolute")
-	assert.Equal(t, []any{"S256"}, doc["code_challenge_methods_supported"], "PKCE S256 should be advertised")
+		origin := "http://" + host
+		assert.Equal(t, origin, doc["issuer"], "issuer should match the requested origin")
+		assert.Equal(t, origin+"/oauth/authorize", doc["authorization_endpoint"], "authorize endpoint should be same-origin")
+		assert.Equal(t, origin+"/oauth/token", doc["token_endpoint"], "token endpoint should be same-origin")
+		assert.Equal(t, []any{"S256"}, doc["code_challenge_methods_supported"], "PKCE S256 should be advertised")
+	}
 }
 
 // signInFlow runs authorize then token with a real PKCE pair and returns the

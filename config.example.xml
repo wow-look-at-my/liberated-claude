@@ -32,11 +32,19 @@
 		<toolSearchEnabled>true</toolSearchEnabled>
 		<isDesktopExtensionEnabled>true</isDesktopExtensionEnabled>
 		<!--
-		  disableDeploymentModeChooser is the flat key for "Disable Claude.ai
-		  sign-in". Setting it true hides the Claude.ai login option, which also
-		  removes the sign-in that Claude.ai data import depends on.
+		  Two spellings of one setting. disableDeploymentModeChooser is its flat
+		  key; the authentication element is the same setting in the app's v2
+		  nested shape, which the app flattens back to that key. Either is
+		  accepted, and a nested element switches the whole document to v2
+		  intake, where unrecognized keys are passed through untouched.
+
+		  True hides the Claude.ai login option, which also removes the sign-in
+		  that Claude.ai data import depends on.
 		-->
 		<disableDeploymentModeChooser>false</disableDeploymentModeChooser>
+		<authentication>
+			<disableClaudeAiSignIn>false</disableClaudeAiSignIn>
+		</authentication>
 		<modelPrefer1mContext>true</modelPrefer1mContext>
 		<!--
 		  enabled on its own imports from Claude.ai through the app's own

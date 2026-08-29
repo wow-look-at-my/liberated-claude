@@ -40,6 +40,8 @@
 		-->
 		<claudeAiImport>
 			<enabled>true</enabled>
+			<automatic3pImport>true</automatic3pImport>
+			<exportEnabled>true</exportEnabled>
 			<bannerBehavior>detect</bannerBehavior>
 		</claudeAiImport>
 		<disableEssentialTelemetry>true</disableEssentialTelemetry>

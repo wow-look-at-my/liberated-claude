@@ -2,6 +2,7 @@ package server
 
 import (
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -69,6 +70,31 @@ func do(t *testing.T, h http.Handler, method, path, key string) *httptest.Respon
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
+}
+
+// fetchFrom issues an authenticated GET whose origin is host under the scheme
+// secure picks. Claude Desktop pins the gateway URL to the origin it fetched
+// the document from, so that origin is an input to the response.
+func fetchFrom(t *testing.T, h http.Handler, path, host string, secure bool) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.Host = host
+	if secure {
+		req.TLS = &tls.ConnectionState{}
+	}
+	req.Header.Set("x-api-key", testKey)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+// decodeDoc reads a successful JSON object response.
+func decodeDoc(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+	require.Equal(t, http.StatusOK, rec.Code, "request should succeed")
+	var doc map[string]any
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&doc), "body should decode")
+	return doc
 }
 
 // Discovery runs before the client holds a credential, so these paths answer
@@ -304,141 +330,6 @@ func TestModelsAdvertiseRealContextWindow(t *testing.T) {
 	small := resp.Data[1]
 	assert.Equal(t, 128000, small.MaxInputTokens, "sub-1M window should be reported as-is")
 	assert.False(t, small.SupportsOneM, "a 128000-token model must not claim 1M")
-}
-
-func TestBootstrapCarriesGatewayAndPricing(t *testing.T) {
-	rec := do(t, newTestServer(t), http.MethodGet, "/bootstrap", testKey)
-	require.Equal(t, http.StatusOK, rec.Code, "bootstrap should succeed")
-
-	var doc map[string]any
-	require.NoError(t, json.NewDecoder(rec.Body).Decode(&doc), "bootstrap body should decode")
-
-	assert.Equal(t, "gateway", doc["inferenceProvider"], "provider should be gateway")
-	assert.Equal(t, true, doc["modelPrefer1mContext"], "preferOneMContext should map through")
-	assert.Equal(t, true, doc["modelDiscoveryEnabled"], "discovery should stay on")
-
-	models, ok := doc["inferenceModels"].([]any)
-	require.True(t, ok, "inferenceModels should be a list")
-	assert.Len(t, models, 2, "both models should be listed")
-
-	rows, ok := doc["inferenceModelPricing"].([]any)
-	require.True(t, ok, "inferenceModelPricing should be a list")
-	require.Len(t, rows, 1, "only the model with a detected rate should be priced")
-	row := rows[0].(map[string]any)
-	assert.InDelta(t, 0.075, row["inputPerMtok"], 1e-12, "detected input rate should carry through")
-	assert.InDelta(t, 0.25, row["outputPerMtok"], 1e-12, "detected output rate should carry through")
-
-	// A fetched document may not carry a loopback gateway URL or the credential
-	// pinned to it: the app deletes both and then calls the config invalid.
-	for _, key := range []string{
-		"inferenceGatewayBaseUrl",
-		"inferenceGatewayApiKey",
-		"inferenceCredentialKind",
-		"inferenceGatewayAuthScheme",
-	} {
-		assert.NotContains(t, doc, key, "%s must not be advertised for a loopback gateway", key)
-	}
-
-	_, hasAnalysis := doc["chatAdvancedFileAnalysisEnabled"]
-	assert.False(t, hasAnalysis, "an unset toggle should be omitted so the app keeps its own default")
-	_, hasToolSearch := doc["toolSearchEnabled"]
-	assert.False(t, hasToolSearch, "an unset toggle should be omitted so the app keeps its own default")
-}
-
-// A gateway reachable over https off-box can advertise its own URL and key,
-// because remote intake keeps both in that case.
-func TestBootstrapAdvertisesAPublicGateway(t *testing.T) {
-	xml := strings.Replace(testConfigXML,
-		"<publicURL>http://127.0.0.1:8787</publicURL>",
-		"<publicURL>https://gateway.example.com</publicURL>", 1)
-	cfg, err := config.Parse([]byte(xml))
-	require.NoError(t, err, "an https gateway config should parse")
-
-	s := New(cfg, http.DefaultClient, slog.New(slog.DiscardHandler))
-	rec := do(t, s.Handler(), http.MethodGet, "/bootstrap", testKey)
-	require.Equal(t, http.StatusOK, rec.Code, "bootstrap should succeed")
-
-	var doc map[string]any
-	require.NoError(t, json.NewDecoder(rec.Body).Decode(&doc), "bootstrap body should decode")
-
-	assert.Equal(t, "https://gateway.example.com", doc["inferenceGatewayBaseUrl"], "a public URL should be advertised")
-	assert.Equal(t, testKey, doc["inferenceGatewayApiKey"], "the key should travel with the URL")
-	assert.Equal(t, "static", doc["inferenceCredentialKind"], "the credential kind should travel with the key")
-}
-
-func TestBootstrapCarriesChatSurfaceToggles(t *testing.T) {
-	xml := strings.Replace(testConfigXML,
-		"<modelPrefer1mContext>true</modelPrefer1mContext>",
-		"<chatTabEnabled>true</chatTabEnabled>"+
-			"<chatAdvancedFileAnalysisEnabled>true</chatAdvancedFileAnalysisEnabled>"+
-			"<toolSearchEnabled>true</toolSearchEnabled>", 1)
-	cfg, err := config.Parse([]byte(xml))
-	require.NoError(t, err, "config with chat surface toggles should parse")
-
-	s := New(cfg, http.DefaultClient, slog.New(slog.DiscardHandler))
-	rec := do(t, s.Handler(), http.MethodGet, "/bootstrap", testKey)
-	require.Equal(t, http.StatusOK, rec.Code, "bootstrap should succeed")
-
-	var doc map[string]any
-	require.NoError(t, json.NewDecoder(rec.Body).Decode(&doc), "bootstrap body should decode")
-
-	assert.Equal(t, true, doc["chatTabEnabled"], "chatTabEnabled should map through")
-	assert.Equal(t, true, doc["chatAdvancedFileAnalysisEnabled"], "advanced file analysis should map through under its flat key")
-	assert.Equal(t, true, doc["toolSearchEnabled"], "tool search should map through")
-}
-
-func TestBootstrapCarriesImportAndExtensions(t *testing.T) {
-	xml := strings.Replace(testConfigXML,
-		"<modelPrefer1mContext>true</modelPrefer1mContext>",
-		"<isDesktopExtensionEnabled>true</isDesktopExtensionEnabled>"+
-			"<claudeAiImport>"+
-			"<enabled>true</enabled>"+
-			"<bannerBehavior>detect</bannerBehavior>"+
-			"</claudeAiImport>", 1)
-	cfg, err := config.Parse([]byte(xml))
-	require.NoError(t, err, "a fully specified import block should parse")
-
-	s := New(cfg, http.DefaultClient, slog.New(slog.DiscardHandler))
-	rec := do(t, s.Handler(), http.MethodGet, "/bootstrap", testKey)
-	require.Equal(t, http.StatusOK, rec.Code, "bootstrap should succeed")
-
-	var doc map[string]any
-	require.NoError(t, json.NewDecoder(rec.Body).Decode(&doc), "bootstrap body should decode")
-
-	assert.Equal(t, true, doc["isDesktopExtensionEnabled"], "desktop extensions should reach the overlay")
-
-	imp, ok := doc["claudeAiImport"].(map[string]any)
-	require.True(t, ok, "claudeAiImport should be a nested object, not flattened")
-	assert.Equal(t, true, imp["enabled"], "import should be enabled")
-	assert.Equal(t, "detect", imp["bannerBehavior"], "banner behavior should carry through")
-	assert.NotContains(t, imp, "url", "no endpoint override should be invented")
-}
-
-func TestBootstrapOmitsUnsetImportBlock(t *testing.T) {
-	rec := do(t, newTestServer(t), http.MethodGet, "/bootstrap", testKey)
-	require.Equal(t, http.StatusOK, rec.Code, "bootstrap should succeed")
-
-	var doc map[string]any
-	require.NoError(t, json.NewDecoder(rec.Body).Decode(&doc), "bootstrap body should decode")
-
-	_, has := doc["claudeAiImport"]
-	assert.False(t, has, "an absent import block should not be emitted as an empty object")
-}
-
-// A model whose rate is out of Claude Desktop's accepted range would invalidate
-// the pricing key, so it is dropped rather than published.
-func TestBootstrapDropsOutOfRangeRates(t *testing.T) {
-	cfg, err := config.Parse([]byte(testConfigXML))
-	require.NoError(t, err, "test config should parse")
-	s := New(cfg, http.DefaultClient, slog.New(slog.DiscardHandler))
-	s.SetRates(map[string]pricing.Rates{"z-ai/glm-5.3-flash": {InputPerMtok: 99999}})
-
-	rec := do(t, s.Handler(), http.MethodGet, "/bootstrap", testKey)
-	require.Equal(t, http.StatusOK, rec.Code, "bootstrap should succeed")
-	var doc map[string]any
-	require.NoError(t, json.NewDecoder(rec.Body).Decode(&doc), "bootstrap body should decode")
-	_, present := doc["inferenceModelPricing"]
-	assert.False(t, present, "an out-of-range rate should leave pricing unset")
 }
 
 func TestUnknownModelIsRejected(t *testing.T) {

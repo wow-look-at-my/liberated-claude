@@ -30,25 +30,27 @@ type modelEntry struct {
 }
 
 // handleBootstrap serves the config overlay (overrides app settings, read-only).
-func (s *Server) handleBootstrap(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.bootstrapConfig())
+func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.bootstrapConfig(requestOrigin(r)))
 }
 
-// bootstrapConfig builds the overlay document. Keys the gateway derives are
-// written first; the config's own <bootstrap> keys are layered over them, so a
-// deployment can override a derived default without a code change.
-func (s *Server) bootstrapConfig() map[string]any {
+// bootstrapConfig builds the overlay document for a client that fetched it from
+// origin. Keys the gateway derives are written first; the config's own
+// <bootstrap> keys are layered over them, so a deployment can override a
+// derived default without a code change.
+func (s *Server) bootstrapConfig(origin string) map[string]any {
 	out := map[string]any{
 		"inferenceProvider": "gateway",
 		// Model list from /v1/models; inferenceModels is fallback if discovery fails.
 		"modelDiscoveryEnabled": true,
 		"inferenceModels":       s.modelEntries(),
 	}
-	// Remote intake deletes a loopback or non-https gateway URL and the
-	// credential pinned to it, then reports the field as set but invalid. A
-	// loopback deployment carries these in its local config instead.
-	if remoteSafeURL(s.cfg.Server.PublicURL) && s.cfg.Server.APIKey != "" {
-		out["inferenceGatewayBaseUrl"] = s.cfg.Server.PublicURL
+	// inferenceGatewayBaseUrl is origin-pinned: remote intake deletes it, and
+	// the credential it carries, unless it names the origin the document was
+	// fetched from and is https on a non-loopback host. A loopback deployment
+	// carries these in its local config instead.
+	if remoteSafeURL(origin) && s.cfg.Server.APIKey != "" {
+		out["inferenceGatewayBaseUrl"] = origin
 		out["inferenceGatewayApiKey"] = s.cfg.Server.APIKey
 		out["inferenceCredentialKind"] = "static"
 		// Desktop sends key as x-api-key (checked first by authenticate()).

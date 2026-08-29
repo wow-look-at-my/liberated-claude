@@ -1,11 +1,14 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -68,20 +71,133 @@ func do(t *testing.T, h http.Handler, method, path, key string) *httptest.Respon
 	return rec
 }
 
-// Claude Desktop probes for RFC 8414 metadata to decide whether the gateway is
-// its own authorization server. A 401 there reads as "an authorization server
-// exists and refused you" and starts an SSO flow this gateway cannot complete,
-// so these paths must answer 404 without requiring a credential.
-func TestWellKnownProbesAre404Unauthenticated(t *testing.T) {
+// Discovery runs before the client holds a credential, so these paths answer
+// without one. openid-configuration stays absent: that document belongs to an
+// external IdP configured through inferenceGatewayOidc, a different sign-in path.
+func TestDiscoveryProbesNeedNoCredential(t *testing.T) {
 	h := newTestServer(t)
-	for _, path := range []string{
-		"/.well-known/oauth-authorization-server",
-		"/.well-known/openid-configuration",
-		"/.well-known/oauth-authorization-server/v1",
+	for path, want := range map[string]int{
+		"/.well-known/oauth-authorization-server":    http.StatusOK,
+		"/.well-known/openid-configuration":          http.StatusNotFound,
+		"/.well-known/oauth-authorization-server/v1": http.StatusNotFound,
 	} {
 		rec := do(t, h, http.MethodGet, path, "")
-		assert.Equal(t, http.StatusNotFound, rec.Code, "%s must be 404, never 401", path)
+		assert.Equal(t, want, rec.Code, "%s should not answer 401", path)
 	}
+}
+
+func TestAuthServerMetadataPointsAtThisGateway(t *testing.T) {
+	rec := do(t, newTestServer(t), http.MethodGet, "/.well-known/oauth-authorization-server", "")
+	require.Equal(t, http.StatusOK, rec.Code, "metadata should be served")
+
+	var doc map[string]any
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&doc), "metadata should decode")
+
+	assert.Equal(t, "http://127.0.0.1:8787", doc["issuer"], "issuer should be the gateway base URL")
+	assert.Equal(t, "http://127.0.0.1:8787/oauth/authorize", doc["authorization_endpoint"], "authorize endpoint should be absolute")
+	assert.Equal(t, "http://127.0.0.1:8787/oauth/token", doc["token_endpoint"], "token endpoint should be absolute")
+	assert.Equal(t, []any{"S256"}, doc["code_challenge_methods_supported"], "PKCE S256 should be advertised")
+}
+
+// signInFlow runs authorize then token with a real PKCE pair and returns the
+// token response.
+func signInFlow(t *testing.T, h http.Handler, verifier string) *httptest.ResponseRecorder {
+	t.Helper()
+	sum := sha256.Sum256([]byte(verifier))
+	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
+
+	q := url.Values{}
+	q.Set("response_type", "code")
+	q.Set("redirect_uri", "http://127.0.0.1:54321/callback")
+	q.Set("state", "xyz")
+	q.Set("code_challenge", challenge)
+	q.Set("code_challenge_method", "S256")
+	rec := do(t, h, http.MethodGet, "/oauth/authorize?"+q.Encode(), "")
+	require.Equal(t, http.StatusFound, rec.Code, "authorize should redirect back")
+
+	loc, err := url.Parse(rec.Header().Get("Location"))
+	require.NoError(t, err, "redirect target should parse")
+	assert.Equal(t, "xyz", loc.Query().Get("state"), "state should be echoed back")
+	code := loc.Query().Get("code")
+	require.NotEmpty(t, code, "a code should be issued")
+
+	form := url.Values{}
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", code)
+	form.Set("code_verifier", verifier)
+	form.Set("redirect_uri", "http://127.0.0.1:54321/callback")
+	req := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	out := httptest.NewRecorder()
+	h.ServeHTTP(out, req)
+	return out
+}
+
+func TestSignInIssuesAUsableBearerToken(t *testing.T) {
+	h := newTestServer(t)
+	rec := signInFlow(t, h, "verifier-that-is-long-enough-to-be-real")
+	require.Equal(t, http.StatusOK, rec.Code, "token exchange should succeed")
+
+	var tok map[string]any
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&tok), "token response should decode")
+	assert.Equal(t, "Bearer", tok["token_type"], "token type should be Bearer")
+
+	got, ok := tok["access_token"].(string)
+	require.True(t, ok, "access_token should be a string")
+
+	// The issued token has to satisfy the same check every later call makes.
+	models := do(t, h, http.MethodGet, "/v1/models", got)
+	assert.Equal(t, http.StatusOK, models.Code, "the issued token should authenticate a real request")
+}
+
+func TestTokenRejectsWrongVerifier(t *testing.T) {
+	h := newTestServer(t)
+	sum := sha256.Sum256([]byte("the-real-verifier"))
+	q := url.Values{}
+	q.Set("response_type", "code")
+	q.Set("redirect_uri", "http://127.0.0.1:54321/callback")
+	q.Set("code_challenge", base64.RawURLEncoding.EncodeToString(sum[:]))
+	q.Set("code_challenge_method", "S256")
+	rec := do(t, h, http.MethodGet, "/oauth/authorize?"+q.Encode(), "")
+	require.Equal(t, http.StatusFound, rec.Code, "authorize should redirect back")
+	loc, err := url.Parse(rec.Header().Get("Location"))
+	require.NoError(t, err, "redirect target should parse")
+
+	form := url.Values{}
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", loc.Query().Get("code"))
+	form.Set("code_verifier", "not-the-real-verifier")
+	req := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	out := httptest.NewRecorder()
+	h.ServeHTTP(out, req)
+	assert.Equal(t, http.StatusBadRequest, out.Code, "a mismatched verifier must not yield a token")
+}
+
+func TestCodeIsRedeemableOnlyOnce(t *testing.T) {
+	h := newTestServer(t)
+	verifier := "verifier-that-is-long-enough-to-be-real"
+	require.Equal(t, http.StatusOK, signInFlow(t, h, verifier).Code, "first exchange should succeed")
+
+	form := url.Values{}
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", "recycled")
+	form.Set("code_verifier", verifier)
+	req := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	out := httptest.NewRecorder()
+	h.ServeHTTP(out, req)
+	assert.Equal(t, http.StatusBadRequest, out.Code, "an unknown code must be refused")
+}
+
+func TestAuthorizeRefusesOffHostRedirect(t *testing.T) {
+	q := url.Values{}
+	q.Set("response_type", "code")
+	q.Set("redirect_uri", "https://evil.invalid/callback")
+	q.Set("code_challenge", "whatever")
+	q.Set("code_challenge_method", "S256")
+	rec := do(t, newTestServer(t), http.MethodGet, "/oauth/authorize?"+q.Encode(), "")
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "the endpoint must not redirect off this machine")
 }
 
 func TestHealthzNeedsNoKey(t *testing.T) {

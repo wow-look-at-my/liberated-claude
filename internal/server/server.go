@@ -24,6 +24,9 @@ type Server struct {
 	// gates admits a bounded number of upstream calls per provider name.
 	gates map[string]chan struct{}
 
+	// codes holds authorization codes between /oauth/authorize and /oauth/token.
+	codes *codeStore
+
 	mu    sync.RWMutex
 	rates map[string]pricing.Rates
 	// noCountTokens names providers that answered the count probe with a refusal.
@@ -45,6 +48,7 @@ func New(cfg *config.Config, client *http.Client, log *slog.Logger) *Server {
 		client:        client,
 		log:           log,
 		gates:         gates,
+		codes:         newCodeStore(),
 		rates:         map[string]pricing.Rates{},
 		noCountTokens: map[string]bool{},
 	}
@@ -97,6 +101,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server", s.handleAuthServerMetadata)
+	mux.HandleFunc("GET /oauth/authorize", s.handleAuthorize)
+	mux.HandleFunc("POST /oauth/token", s.handleToken)
 	mux.HandleFunc("/.well-known/", handleWellKnown)
 	return s.logRequests(s.authenticate(mux))
 }
@@ -156,15 +163,17 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 	})
 }
 
-// unauthenticatedPath exempts discovery probes. 404 tells Desktop no SSO exists.
+// unauthenticatedPath exempts what a client reaches before it holds a credential.
 func unauthenticatedPath(p string) bool {
-	return p == "/healthz" || strings.HasPrefix(p, "/.well-known/")
+	return p == "/healthz" ||
+		strings.HasPrefix(p, "/.well-known/") ||
+		strings.HasPrefix(p, "/oauth/")
 }
 
-// handleWellKnown declines discovery probes (404 for any well-known document).
+// handleWellKnown declines the discovery documents this gateway does not host.
 func handleWellKnown(w http.ResponseWriter, _ *http.Request) {
 	writeError(w, http.StatusNotFound, "not_found_error",
-		"this gateway authenticates with a static API key and hosts no authorization server metadata")
+		"this gateway hosts no discovery document at that path")
 }
 
 // presentedKey pulls the credential out of whichever header carries it.

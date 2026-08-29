@@ -31,6 +31,12 @@
 		<autoModeEnabled>true</autoModeEnabled>
 		<toolSearchEnabled>true</toolSearchEnabled>
 		<isDesktopExtensionEnabled>true</isDesktopExtensionEnabled>
+		<!--
+		  disableDeploymentModeChooser is the flat key for "Disable Claude.ai
+		  sign-in". Setting it true hides the Claude.ai login option, which also
+		  removes the sign-in that Claude.ai data import depends on.
+		-->
+		<disableDeploymentModeChooser>false</disableDeploymentModeChooser>
 		<modelPrefer1mContext>true</modelPrefer1mContext>
 		<!--
 		  enabled on its own imports from Claude.ai through the app's own

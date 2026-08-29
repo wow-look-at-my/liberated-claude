@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"net/url"
 
 	"github.com/wow-look-at-my/liberated-claude/internal/config"
 	"github.com/wow-look-at-my/liberated-claude/internal/pricing"
@@ -38,15 +39,20 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, _ *http.Request) {
 // deployment can override a derived default without a code change.
 func (s *Server) bootstrapConfig() map[string]any {
 	out := map[string]any{
-		"inferenceProvider":       "gateway",
-		"inferenceCredentialKind": "static",
-		"inferenceGatewayBaseUrl": s.cfg.Server.PublicURL,
-		"inferenceGatewayApiKey":  s.cfg.Server.APIKey,
-		// Desktop sends key as x-api-key (checked first by authenticate()).
-		"inferenceGatewayAuthScheme": "x-api-key",
+		"inferenceProvider": "gateway",
 		// Model list from /v1/models; inferenceModels is fallback if discovery fails.
 		"modelDiscoveryEnabled": true,
 		"inferenceModels":       s.modelEntries(),
+	}
+	// Remote intake deletes a loopback or non-https gateway URL and the
+	// credential pinned to it, then reports the field as set but invalid. A
+	// loopback deployment carries these in its local config instead.
+	if remoteSafeURL(s.cfg.Server.PublicURL) && s.cfg.Server.APIKey != "" {
+		out["inferenceGatewayBaseUrl"] = s.cfg.Server.PublicURL
+		out["inferenceGatewayApiKey"] = s.cfg.Server.APIKey
+		out["inferenceCredentialKind"] = "static"
+		// Desktop sends key as x-api-key (checked first by authenticate()).
+		out["inferenceGatewayAuthScheme"] = "x-api-key"
 	}
 	if rows := s.priceRows(); len(rows) > 0 {
 		out["inferenceModelPricingEnabled"] = true
@@ -56,6 +62,20 @@ func (s *Server) bootstrapConfig() map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+// remoteSafeURL reports whether a fetched document may carry this URL: the app
+// keeps https on a non-loopback host and deletes everything else.
+func remoteSafeURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" {
+		return false
+	}
+	switch u.Hostname() {
+	case "localhost", "127.0.0.1", "::1", "":
+		return false
+	}
+	return true
 }
 
 // modelEntries lists the configured models in Claude Desktop's own shape.

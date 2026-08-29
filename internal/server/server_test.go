@@ -314,8 +314,6 @@ func TestBootstrapCarriesGatewayAndPricing(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&doc), "bootstrap body should decode")
 
 	assert.Equal(t, "gateway", doc["inferenceProvider"], "provider should be gateway")
-	assert.Equal(t, "x-api-key", doc["inferenceGatewayAuthScheme"], "auth scheme should match the key check")
-	assert.Equal(t, "http://127.0.0.1:8787", doc["inferenceGatewayBaseUrl"], "gateway URL should come from config")
 	assert.Equal(t, true, doc["modelPrefer1mContext"], "preferOneMContext should map through")
 	assert.Equal(t, true, doc["modelDiscoveryEnabled"], "discovery should stay on")
 
@@ -330,10 +328,42 @@ func TestBootstrapCarriesGatewayAndPricing(t *testing.T) {
 	assert.InDelta(t, 0.075, row["inputPerMtok"], 1e-12, "detected input rate should carry through")
 	assert.InDelta(t, 0.25, row["outputPerMtok"], 1e-12, "detected output rate should carry through")
 
+	// A fetched document may not carry a loopback gateway URL or the credential
+	// pinned to it: the app deletes both and then calls the config invalid.
+	for _, key := range []string{
+		"inferenceGatewayBaseUrl",
+		"inferenceGatewayApiKey",
+		"inferenceCredentialKind",
+		"inferenceGatewayAuthScheme",
+	} {
+		assert.NotContains(t, doc, key, "%s must not be advertised for a loopback gateway", key)
+	}
+
 	_, hasAnalysis := doc["chatAdvancedFileAnalysisEnabled"]
 	assert.False(t, hasAnalysis, "an unset toggle should be omitted so the app keeps its own default")
 	_, hasToolSearch := doc["toolSearchEnabled"]
 	assert.False(t, hasToolSearch, "an unset toggle should be omitted so the app keeps its own default")
+}
+
+// A gateway reachable over https off-box can advertise its own URL and key,
+// because remote intake keeps both in that case.
+func TestBootstrapAdvertisesAPublicGateway(t *testing.T) {
+	xml := strings.Replace(testConfigXML,
+		"<publicURL>http://127.0.0.1:8787</publicURL>",
+		"<publicURL>https://gateway.example.com</publicURL>", 1)
+	cfg, err := config.Parse([]byte(xml))
+	require.NoError(t, err, "an https gateway config should parse")
+
+	s := New(cfg, http.DefaultClient, slog.New(slog.DiscardHandler))
+	rec := do(t, s.Handler(), http.MethodGet, "/bootstrap", testKey)
+	require.Equal(t, http.StatusOK, rec.Code, "bootstrap should succeed")
+
+	var doc map[string]any
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&doc), "bootstrap body should decode")
+
+	assert.Equal(t, "https://gateway.example.com", doc["inferenceGatewayBaseUrl"], "a public URL should be advertised")
+	assert.Equal(t, testKey, doc["inferenceGatewayApiKey"], "the key should travel with the URL")
+	assert.Equal(t, "static", doc["inferenceCredentialKind"], "the credential kind should travel with the key")
 }
 
 func TestBootstrapCarriesChatSurfaceToggles(t *testing.T) {

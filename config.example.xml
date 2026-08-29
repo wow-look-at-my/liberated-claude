@@ -14,8 +14,17 @@
 <liberatedClaude>
 	<server>
 		<listen>127.0.0.1:8787</listen>
-		<publicURL>http://127.0.0.1:8787</publicURL>
+		<!--
+		  Claude Desktop deletes a loopback or non-https inferenceGatewayBaseUrl
+		  from a fetched document, so a gateway that advertises itself needs a
+		  non-loopback name over TLS. gateway.localtest.me resolves to 127.0.0.1
+		  from public DNS, which gets that without an /etc/hosts entry; mkcert
+		  issues a certificate the system already trusts.
+		-->
+		<publicURL>https://gateway.localtest.me:8787</publicURL>
 		<apiKey>${LIBERATED_CLAUDE_KEY}</apiKey>
+		<tlsCert>certs/gateway.pem</tlsCert>
+		<tlsKey>certs/gateway-key.pem</tlsKey>
 	</server>
 
 	<!--
@@ -32,7 +41,7 @@
 		  bootstrap.url; trustBootstrapDelivery skips the per-user consent prompt
 		  for sign-in targets, helper scripts and connectors this server sends.
 		-->
-		<bootstrapUrl>http://localhost:8787/bootstrap</bootstrapUrl>
+		<bootstrapUrl>https://gateway.localtest.me:8787/bootstrap</bootstrapUrl>
 		<trustBootstrapDelivery>true</trustBootstrapDelivery>
 		<!-- Children named item make a JSON array; any other name makes an object. -->
 		<sshHostAllowlist>

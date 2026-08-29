@@ -64,9 +64,15 @@ func run(configPath string, log *slog.Logger) error {
 
 	errc := make(chan error, 1)
 	go func() {
+		tls := cfg.Server.TLSCert != "" && cfg.Server.TLSKey != ""
 		log.Info("listening",
 			"addr", cfg.Server.Listen,
+			"tls", tls,
 			"bootstrapUrl", strings.TrimRight(cfg.Server.PublicURL, "/")+"/bootstrap")
+		if tls {
+			errc <- httpSrv.ListenAndServeTLS(cfg.Server.TLSCert, cfg.Server.TLSKey)
+			return
+		}
 		errc <- httpSrv.ListenAndServe()
 	}()
 

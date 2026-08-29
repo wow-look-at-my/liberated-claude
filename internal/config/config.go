@@ -64,6 +64,9 @@ type Server struct {
 	APIKey string `xml:"apiKey"`
 	// PublicURL is written to bootstrap as inferenceGatewayBaseUrl.
 	PublicURL string `xml:"publicURL"`
+	// TLSCert and TLSKey turn the listener into HTTPS when both are set.
+	TLSCert string `xml:"tlsCert"`
+	TLSKey  string `xml:"tlsKey"`
 }
 
 // Provider is one upstream API and the models reachable through it.

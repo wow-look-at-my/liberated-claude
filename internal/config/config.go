@@ -75,10 +75,61 @@ type Bootstrap struct {
 	ChatAdvancedFileAnalysisEnabled *bool `xml:"chatAdvancedFileAnalysisEnabled"`
 	AutoModeEnabled                 *bool `xml:"autoModeEnabled"`
 	ToolSearchEnabled               *bool `xml:"toolSearchEnabled"`
+	// DesktopExtensionEnabled maps to isDesktopExtensionEnabled (legacy isDxtEnabled).
+	DesktopExtensionEnabled *bool          `xml:"desktopExtensionEnabled"`
+	ClaudeAiImport          ClaudeAiImport `xml:"claudeAiImport"`
 	// PreferOneMContext picks the 1M variant by default (maps to modelPrefer1mContext).
 	PreferOneMContext *bool `xml:"preferOneMContext"`
 	// DisableTelemetry sets both telemetry keys the app understands.
 	DisableTelemetry *bool `xml:"disableTelemetry"`
+}
+
+// ClaudeAiImport configures the Claude.ai data import endpoint. The app requires
+// url, oauthIssuer and oauthClientId together whenever the feature is enabled.
+type ClaudeAiImport struct {
+	Enabled       *bool  `xml:"enabled"`
+	URL           string `xml:"url"`
+	OAuthIssuer   string `xml:"oauthIssuer"`
+	OAuthClientID string `xml:"oauthClientId"`
+	// BannerBehavior is one of off, detect or show.
+	BannerBehavior string `xml:"bannerBehavior"`
+}
+
+// Set reports whether any import field was supplied.
+func (c ClaudeAiImport) Set() bool {
+	return c.Enabled != nil || c.URL != "" || c.OAuthIssuer != "" ||
+		c.OAuthClientID != "" || c.BannerBehavior != ""
+}
+
+// validate rejects an import block the app would refuse, so the failure names
+// the missing element here instead of surfacing as a rejected overlay.
+func (c ClaudeAiImport) validate() error {
+	switch c.BannerBehavior {
+	case "", "off", "detect", "show":
+	default:
+		return fmt.Errorf(
+			"bootstrap.claudeAiImport.bannerBehavior %q is not one of off, detect, show",
+			c.BannerBehavior)
+	}
+	if c.Enabled == nil || !*c.Enabled {
+		return nil
+	}
+	var missing []string
+	if c.URL == "" {
+		missing = append(missing, "url")
+	}
+	if c.OAuthIssuer == "" {
+		missing = append(missing, "oauthIssuer")
+	}
+	if c.OAuthClientID == "" {
+		missing = append(missing, "oauthClientId")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf(
+			"bootstrap.claudeAiImport is enabled but missing %s",
+			strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 // Provider is one upstream API and the models reachable through it.
@@ -269,6 +320,9 @@ func (c *Config) expand() error {
 func (c *Config) validate() error {
 	if c.Server.Listen == "" {
 		return fmt.Errorf("server.listen is required")
+	}
+	if err := c.Bootstrap.ClaudeAiImport.validate(); err != nil {
+		return err
 	}
 	if len(c.Providers) == 0 {
 		if len(c.Skipped) > 0 {

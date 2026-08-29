@@ -172,6 +172,49 @@ func TestBootstrapCarriesChatSurfaceToggles(t *testing.T) {
 	assert.Equal(t, true, doc["toolSearchEnabled"], "tool search should map through")
 }
 
+func TestBootstrapCarriesImportAndExtensions(t *testing.T) {
+	xml := strings.Replace(testConfigXML,
+		"<preferOneMContext>true</preferOneMContext>",
+		"<desktopExtensionEnabled>true</desktopExtensionEnabled>"+
+			"<claudeAiImport>"+
+			"<enabled>true</enabled>"+
+			"<url>https://example.invalid/export</url>"+
+			"<oauthIssuer>https://example.invalid</oauthIssuer>"+
+			"<oauthClientId>cid</oauthClientId>"+
+			"<bannerBehavior>detect</bannerBehavior>"+
+			"</claudeAiImport>", 1)
+	cfg, err := config.Parse([]byte(xml))
+	require.NoError(t, err, "a fully specified import block should parse")
+
+	s := New(cfg, http.DefaultClient, slog.New(slog.DiscardHandler))
+	rec := do(t, s.Handler(), http.MethodGet, "/bootstrap", testKey)
+	require.Equal(t, http.StatusOK, rec.Code, "bootstrap should succeed")
+
+	var doc map[string]any
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&doc), "bootstrap body should decode")
+
+	assert.Equal(t, true, doc["isDesktopExtensionEnabled"], "desktop extensions should map through under the app's flat key")
+
+	imp, ok := doc["claudeAiImport"].(map[string]any)
+	require.True(t, ok, "claudeAiImport should be a nested object, not flattened")
+	assert.Equal(t, true, imp["enabled"], "import should be enabled")
+	assert.Equal(t, "https://example.invalid/export", imp["url"], "export URL should carry through")
+	assert.Equal(t, "https://example.invalid", imp["oauthIssuer"], "issuer should carry through")
+	assert.Equal(t, "cid", imp["oauthClientId"], "client ID should carry through")
+	assert.Equal(t, "detect", imp["bannerBehavior"], "banner behavior should carry through")
+}
+
+func TestBootstrapOmitsUnsetImportBlock(t *testing.T) {
+	rec := do(t, newTestServer(t), http.MethodGet, "/bootstrap", testKey)
+	require.Equal(t, http.StatusOK, rec.Code, "bootstrap should succeed")
+
+	var doc map[string]any
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&doc), "bootstrap body should decode")
+
+	_, has := doc["claudeAiImport"]
+	assert.False(t, has, "an absent import block should not be emitted as an empty object")
+}
+
 // A model whose rate is out of Claude Desktop's accepted range would invalidate
 // the pricing key, so it is dropped rather than published.
 func TestBootstrapDropsOutOfRangeRates(t *testing.T) {

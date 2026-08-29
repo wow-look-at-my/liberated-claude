@@ -54,7 +54,11 @@ func (s *Server) bootstrapConfig() map[string]any {
 	setBool(out, "chatAdvancedFileAnalysisEnabled", b.ChatAdvancedFileAnalysisEnabled)
 	setBool(out, "autoModeEnabled", b.AutoModeEnabled)
 	setBool(out, "toolSearchEnabled", b.ToolSearchEnabled)
+	setBool(out, "isDesktopExtensionEnabled", b.DesktopExtensionEnabled)
 	setBool(out, "modelPrefer1mContext", b.PreferOneMContext)
+	if imp := importBlock(b.ClaudeAiImport); imp != nil {
+		out["claudeAiImport"] = imp
+	}
 	if b.DisableTelemetry != nil && *b.DisableTelemetry {
 		out["disableEssentialTelemetry"] = true
 		out["disableNonessentialTelemetry"] = true
@@ -64,6 +68,28 @@ func (s *Server) bootstrapConfig() map[string]any {
 		out["inferenceModelPricing"] = rows
 	}
 	return out
+}
+
+// importBlock renders claudeAiImport as the nested object the app expects,
+// returning nil when the config left the whole block out.
+func importBlock(c config.ClaudeAiImport) map[string]any {
+	if !c.Set() {
+		return nil
+	}
+	out := map[string]any{}
+	setBool(out, "enabled", c.Enabled)
+	setString(out, "url", c.URL)
+	setString(out, "oauthIssuer", c.OAuthIssuer)
+	setString(out, "oauthClientId", c.OAuthClientID)
+	setString(out, "bannerBehavior", c.BannerBehavior)
+	return out
+}
+
+// setString adds key only when the config supplied a non-empty value.
+func setString(m map[string]any, key, v string) {
+	if v != "" {
+		m[key] = v
+	}
 }
 
 // setBool adds key only when the config supplied a value, so an unset element

@@ -24,7 +24,16 @@
 		<chatAdvancedFileAnalysisEnabled>true</chatAdvancedFileAnalysisEnabled>
 		<autoModeEnabled>true</autoModeEnabled>
 		<toolSearchEnabled>true</toolSearchEnabled>
+		<desktopExtensionEnabled>true</desktopExtensionEnabled>
 		<preferOneMContext>true</preferOneMContext>
+		<!-- url, oauthIssuer and oauthClientId are required whenever enabled is true. -->
+		<claudeAiImport>
+			<enabled>true</enabled>
+			<url>https://claude.ai/api/organizations/export</url>
+			<oauthIssuer>https://claude.ai</oauthIssuer>
+			<oauthClientId>REPLACE_ME</oauthClientId>
+			<bannerBehavior>detect</bannerBehavior>
+		</claudeAiImport>
 		<disableTelemetry>true</disableTelemetry>
 	</bootstrap>
 

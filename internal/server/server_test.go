@@ -30,7 +30,7 @@ const testConfigXML = `<?xml version="1.0" encoding="UTF-8"?>
 	</server>
 	<bootstrap>
 		<deploymentDisplayName>Test</deploymentDisplayName>
-		<preferOneMContext>true</preferOneMContext>
+		<modelPrefer1mContext>true</modelPrefer1mContext>
 	</bootstrap>
 	<providers>
 		<provider name="p" kind="openai" cache="implicit">
@@ -153,7 +153,7 @@ func TestBootstrapCarriesGatewayAndPricing(t *testing.T) {
 
 func TestBootstrapCarriesChatSurfaceToggles(t *testing.T) {
 	xml := strings.Replace(testConfigXML,
-		"<preferOneMContext>true</preferOneMContext>",
+		"<modelPrefer1mContext>true</modelPrefer1mContext>",
 		"<chatTabEnabled>true</chatTabEnabled>"+
 			"<chatAdvancedFileAnalysisEnabled>true</chatAdvancedFileAnalysisEnabled>"+
 			"<toolSearchEnabled>true</toolSearchEnabled>", 1)
@@ -174,13 +174,10 @@ func TestBootstrapCarriesChatSurfaceToggles(t *testing.T) {
 
 func TestBootstrapCarriesImportAndExtensions(t *testing.T) {
 	xml := strings.Replace(testConfigXML,
-		"<preferOneMContext>true</preferOneMContext>",
-		"<desktopExtensionEnabled>true</desktopExtensionEnabled>"+
+		"<modelPrefer1mContext>true</modelPrefer1mContext>",
+		"<isDesktopExtensionEnabled>true</isDesktopExtensionEnabled>"+
 			"<claudeAiImport>"+
 			"<enabled>true</enabled>"+
-			"<url>https://example.invalid/export</url>"+
-			"<oauthIssuer>https://example.invalid</oauthIssuer>"+
-			"<oauthClientId>cid</oauthClientId>"+
 			"<bannerBehavior>detect</bannerBehavior>"+
 			"</claudeAiImport>", 1)
 	cfg, err := config.Parse([]byte(xml))
@@ -193,15 +190,13 @@ func TestBootstrapCarriesImportAndExtensions(t *testing.T) {
 	var doc map[string]any
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&doc), "bootstrap body should decode")
 
-	assert.Equal(t, true, doc["isDesktopExtensionEnabled"], "desktop extensions should map through under the app's flat key")
+	assert.Equal(t, true, doc["isDesktopExtensionEnabled"], "desktop extensions should reach the overlay")
 
 	imp, ok := doc["claudeAiImport"].(map[string]any)
 	require.True(t, ok, "claudeAiImport should be a nested object, not flattened")
 	assert.Equal(t, true, imp["enabled"], "import should be enabled")
-	assert.Equal(t, "https://example.invalid/export", imp["url"], "export URL should carry through")
-	assert.Equal(t, "https://example.invalid", imp["oauthIssuer"], "issuer should carry through")
-	assert.Equal(t, "cid", imp["oauthClientId"], "client ID should carry through")
 	assert.Equal(t, "detect", imp["bannerBehavior"], "banner behavior should carry through")
+	assert.NotContains(t, imp, "url", "no endpoint override should be invented")
 }
 
 func TestBootstrapOmitsUnsetImportBlock(t *testing.T) {

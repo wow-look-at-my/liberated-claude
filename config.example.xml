@@ -18,23 +18,32 @@
 		<apiKey>${LIBERATED_CLAUDE_KEY}</apiKey>
 	</server>
 
+	<!--
+	  Element names are Claude Desktop's own setting keys and are sent through
+	  untranslated. "true" and "false" become JSON booleans; every other value is
+	  sent as a string. An element left out is not sent at all, so the app keeps
+	  its own default rather than being forced to false.
+	-->
 	<bootstrap>
 		<deploymentDisplayName>Liberated Claude</deploymentDisplayName>
 		<chatTabEnabled>true</chatTabEnabled>
 		<chatAdvancedFileAnalysisEnabled>true</chatAdvancedFileAnalysisEnabled>
 		<autoModeEnabled>true</autoModeEnabled>
 		<toolSearchEnabled>true</toolSearchEnabled>
-		<desktopExtensionEnabled>true</desktopExtensionEnabled>
-		<preferOneMContext>true</preferOneMContext>
-		<!-- url, oauthIssuer and oauthClientId are required whenever enabled is true. -->
+		<isDesktopExtensionEnabled>true</isDesktopExtensionEnabled>
+		<modelPrefer1mContext>true</modelPrefer1mContext>
+		<!--
+		  enabled on its own imports from Claude.ai through the app's own
+		  endpoints. url, oauthIssuer and oauthClientId override that with a
+		  self-hosted export service and are set together or left entirely empty;
+		  the app refuses the override when oauthIssuer is an Anthropic host.
+		-->
 		<claudeAiImport>
 			<enabled>true</enabled>
-			<url>https://claude.ai/api/organizations/export</url>
-			<oauthIssuer>https://claude.ai</oauthIssuer>
-			<oauthClientId>REPLACE_ME</oauthClientId>
 			<bannerBehavior>detect</bannerBehavior>
 		</claudeAiImport>
-		<disableTelemetry>true</disableTelemetry>
+		<disableEssentialTelemetry>true</disableEssentialTelemetry>
+		<disableNonessentialTelemetry>true</disableNonessentialTelemetry>
 	</bootstrap>
 
 	<providers>

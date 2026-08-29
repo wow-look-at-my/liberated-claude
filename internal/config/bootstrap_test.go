@@ -1,7 +1,6 @@
 package config
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,39 +27,65 @@ func bootstrapXML(body string) []byte {
 </liberatedClaude>`)
 }
 
-func TestParseDesktopExtensionToggle(t *testing.T) {
-	c, err := Parse(bootstrapXML(`<desktopExtensionEnabled>true</desktopExtensionEnabled>`))
-	require.NoError(t, err, "desktop extension toggle should parse")
-	require.NotNil(t, c.Bootstrap.DesktopExtensionEnabled, "toggle should be present")
-	assert.True(t, *c.Bootstrap.DesktopExtensionEnabled, "toggle should be true")
-}
-
-func TestParseImportBannerOnlyIsAllowed(t *testing.T) {
+func TestBootstrapPassesKeysThroughUntranslated(t *testing.T) {
 	c, err := Parse(bootstrapXML(
-		`<claudeAiImport><bannerBehavior>detect</bannerBehavior></claudeAiImport>`))
-	require.NoError(t, err, "a banner setting without an endpoint should be allowed")
-	assert.Equal(t, "detect", c.Bootstrap.ClaudeAiImport.BannerBehavior, "banner behavior should parse")
-	assert.True(t, c.Bootstrap.ClaudeAiImport.Set(), "a banner-only block still counts as set")
+		`<isDesktopExtensionEnabled>true</isDesktopExtensionEnabled>` +
+			`<chatTabEnabled>false</chatTabEnabled>` +
+			`<deploymentDisplayName>Liberated Claude</deploymentDisplayName>`))
+	require.NoError(t, err, "arbitrary overlay keys should parse")
+
+	doc := c.Bootstrap.JSON()
+	assert.Equal(t, true, doc["isDesktopExtensionEnabled"], "true should become a JSON boolean")
+	assert.Equal(t, false, doc["chatTabEnabled"], "false should become a JSON boolean")
+	assert.Equal(t, "Liberated Claude", doc["deploymentDisplayName"], "other values should stay strings")
+	assert.Len(t, doc, 3, "no key should be invented")
 }
 
-func TestParseImportEnabledRequiresEndpoint(t *testing.T) {
+func TestBootstrapKeepsNumericLookingValuesAsStrings(t *testing.T) {
+	c, err := Parse(bootstrapXML(
+		`<claudeAiImport>` +
+			`<url>https://example.invalid/e</url>` +
+			`<oauthIssuer>https://example.invalid</oauthIssuer>` +
+			`<oauthClientId>12345</oauthClientId>` +
+			`</claudeAiImport>`))
+	require.NoError(t, err, "a complete endpoint trio should parse")
+
+	imp, ok := c.Bootstrap.JSON()["claudeAiImport"].(map[string]any)
+	require.True(t, ok, "a nested element should become a nested object")
+	assert.Equal(t, "12345", imp["oauthClientId"], "a numeric-looking credential must stay a string")
+}
+
+func TestBootstrapEnabledImportNeedsNoEndpoint(t *testing.T) {
+	c, err := Parse(bootstrapXML(
+		`<claudeAiImport><enabled>true</enabled><bannerBehavior>detect</bannerBehavior></claudeAiImport>`))
+	require.NoError(t, err, "enabling import without an endpoint override is the normal case")
+
+	imp := c.Bootstrap.JSON()["claudeAiImport"].(map[string]any)
+	assert.Equal(t, true, imp["enabled"], "enabled should carry through")
+	assert.Equal(t, "detect", imp["bannerBehavior"], "banner behavior should carry through")
+}
+
+func TestBootstrapImportEndpointIsAllOrNothing(t *testing.T) {
 	_, err := Parse(bootstrapXML(
-		`<claudeAiImport><enabled>true</enabled><url>https://example.invalid/e</url></claudeAiImport>`))
-	require.Error(t, err, "enabling import without every endpoint field should fail")
+		`<claudeAiImport><url>https://example.invalid/e</url></claudeAiImport>`))
+	require.Error(t, err, "a partial endpoint override should fail")
 	assert.Contains(t, err.Error(), "oauthIssuer", "error should name the missing issuer")
 	assert.Contains(t, err.Error(), "oauthClientId", "error should name the missing client ID")
-	assert.False(t, strings.Contains(err.Error(), " url"), "a supplied field should not be reported missing")
+	assert.Contains(t, err.Error(), "url set without", "error should name the field that was supplied")
 }
 
-func TestParseImportRejectsUnknownBannerBehavior(t *testing.T) {
+func TestBootstrapRejectsUnknownBannerBehavior(t *testing.T) {
 	_, err := Parse(bootstrapXML(
 		`<claudeAiImport><bannerBehavior>always</bannerBehavior></claudeAiImport>`))
 	require.Error(t, err, "an unknown banner behavior should fail")
 	assert.Contains(t, err.Error(), "off, detect, show", "error should list the accepted values")
 }
 
-func TestParseImportAbsentIsUnset(t *testing.T) {
-	c, err := Parse(bootstrapXML(`<chatTabEnabled>true</chatTabEnabled>`))
-	require.NoError(t, err, "a bootstrap without an import block should parse")
-	assert.False(t, c.Bootstrap.ClaudeAiImport.Set(), "an absent block should report unset")
+func TestBootstrapAbsentIsEmpty(t *testing.T) {
+	c, err := Parse(bootstrapXML(``))
+	require.NoError(t, err, "an empty bootstrap should parse")
+	assert.Empty(t, c.Bootstrap.JSON(), "an empty bootstrap should add no keys")
+
+	_, ok := c.Bootstrap.Bool("modelPrefer1mContext")
+	assert.False(t, ok, "an absent toggle should report as not supplied")
 }

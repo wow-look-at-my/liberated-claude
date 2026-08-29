@@ -33,9 +33,10 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.bootstrapConfig())
 }
 
-// bootstrapConfig builds the overlay document.
+// bootstrapConfig builds the overlay document. Keys the gateway derives are
+// written first; the config's own <bootstrap> keys are layered over them, so a
+// deployment can override a derived default without a code change.
 func (s *Server) bootstrapConfig() map[string]any {
-	b := s.cfg.Bootstrap
 	out := map[string]any{
 		"inferenceProvider":       "gateway",
 		"inferenceCredentialKind": "static",
@@ -47,64 +48,21 @@ func (s *Server) bootstrapConfig() map[string]any {
 		"modelDiscoveryEnabled": true,
 		"inferenceModels":       s.modelEntries(),
 	}
-	if b.DeploymentDisplayName != "" {
-		out["deploymentDisplayName"] = b.DeploymentDisplayName
-	}
-	setBool(out, "chatTabEnabled", b.ChatTabEnabled)
-	setBool(out, "chatAdvancedFileAnalysisEnabled", b.ChatAdvancedFileAnalysisEnabled)
-	setBool(out, "autoModeEnabled", b.AutoModeEnabled)
-	setBool(out, "toolSearchEnabled", b.ToolSearchEnabled)
-	setBool(out, "isDesktopExtensionEnabled", b.DesktopExtensionEnabled)
-	setBool(out, "modelPrefer1mContext", b.PreferOneMContext)
-	if imp := importBlock(b.ClaudeAiImport); imp != nil {
-		out["claudeAiImport"] = imp
-	}
-	if b.DisableTelemetry != nil && *b.DisableTelemetry {
-		out["disableEssentialTelemetry"] = true
-		out["disableNonessentialTelemetry"] = true
-	}
 	if rows := s.priceRows(); len(rows) > 0 {
 		out["inferenceModelPricingEnabled"] = true
 		out["inferenceModelPricing"] = rows
 	}
+	for k, v := range s.cfg.Bootstrap.JSON() {
+		out[k] = v
+	}
 	return out
-}
-
-// importBlock renders claudeAiImport as the nested object the app expects,
-// returning nil when the config left the whole block out.
-func importBlock(c config.ClaudeAiImport) map[string]any {
-	if !c.Set() {
-		return nil
-	}
-	out := map[string]any{}
-	setBool(out, "enabled", c.Enabled)
-	setString(out, "url", c.URL)
-	setString(out, "oauthIssuer", c.OAuthIssuer)
-	setString(out, "oauthClientId", c.OAuthClientID)
-	setString(out, "bannerBehavior", c.BannerBehavior)
-	return out
-}
-
-// setString adds key only when the config supplied a non-empty value.
-func setString(m map[string]any, key, v string) {
-	if v != "" {
-		m[key] = v
-	}
-}
-
-// setBool adds key only when the config supplied a value, so an unset element
-// leaves the app's own default in place rather than forcing false.
-func setBool(m map[string]any, key string, v *bool) {
-	if v != nil {
-		m[key] = *v
-	}
 }
 
 // modelEntries lists the configured models in Claude Desktop's own shape.
 func (s *Server) modelEntries() []modelEntry {
 	models := s.cfg.Models()
 	out := make([]modelEntry, 0, len(models))
-	preferOneM := s.cfg.Bootstrap.PreferOneMContext != nil && *s.cfg.Bootstrap.PreferOneMContext
+	preferOneM, _ := s.cfg.Bootstrap.Bool("modelPrefer1mContext")
 	for _, m := range models {
 		oneM := m.SupportsOneM()
 		out = append(out, modelEntry{

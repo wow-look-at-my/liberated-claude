@@ -19,7 +19,14 @@
 		  from a fetched document, so a gateway that advertises itself needs a
 		  non-loopback name over TLS. gateway.localtest.me resolves to 127.0.0.1
 		  from public DNS, which gets that without an /etc/hosts entry; mkcert
-		  issues a certificate the system already trusts.
+		  issues a certificate the system already trusts:
+
+		    mkcert -cert-file certs/gateway.pem -key-file certs/gateway-key.pem \
+		        gateway.localtest.me localhost 127.0.0.1 ::1
+
+		  The loopback names belong in that list too. The same listener answers
+		  to all four, and a client dialling it as localhost checks the name
+		  against the certificate like any other host.
 		-->
 		<publicURL>https://gateway.localtest.me:8787</publicURL>
 		<apiKey>${LIBERATED_CLAUDE_KEY}</apiKey>

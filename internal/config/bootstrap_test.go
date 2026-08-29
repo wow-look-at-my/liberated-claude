@@ -81,6 +81,20 @@ func TestBootstrapRejectsUnknownBannerBehavior(t *testing.T) {
 	assert.Contains(t, err.Error(), "off, detect, show", "error should list the accepted values")
 }
 
+func TestBootstrapRendersItemChildrenAsArrays(t *testing.T) {
+	c, err := Parse(bootstrapXML(
+		`<sshHostAllowlist><item>*</item></sshHostAllowlist>` +
+			`<coworkEgressAllowedHosts><item>a.invalid</item><item>b.invalid</item></coworkEgressAllowedHosts>` +
+			`<authentication><disableClaudeAiSignIn>false</disableClaudeAiSignIn></authentication>`))
+	require.NoError(t, err, "list and object elements should parse")
+
+	doc := c.Bootstrap.JSON()
+	assert.Equal(t, []any{"*"}, doc["sshHostAllowlist"], "a single item child should still be an array")
+	assert.Equal(t, []any{"a.invalid", "b.invalid"}, doc["coworkEgressAllowedHosts"], "items should keep their order")
+	assert.Equal(t, map[string]any{"disableClaudeAiSignIn": false},
+		doc["authentication"], "a lone non-item child must stay an object, not become an array")
+}
+
 func TestBootstrapAbsentIsEmpty(t *testing.T) {
 	c, err := Parse(bootstrapXML(``))
 	require.NoError(t, err, "an empty bootstrap should parse")

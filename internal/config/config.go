@@ -91,13 +91,35 @@ func (b Bootstrap) JSON() map[string]any {
 func settingsJSON(settings []Setting) map[string]any {
 	out := make(map[string]any, len(settings))
 	for _, s := range settings {
-		if len(s.Children) > 0 {
-			out[s.Name()] = settingsJSON(s.Children)
-			continue
-		}
-		out[s.Name()] = scalar(strings.TrimSpace(s.Value))
+		out[s.Name()] = s.value()
 	}
 	return out
+}
+
+// value renders one setting: an array when every child is <item>, a nested
+// object when it has other children, a scalar otherwise.
+func (s Setting) value() any {
+	if len(s.Children) == 0 {
+		return scalar(strings.TrimSpace(s.Value))
+	}
+	if !s.isList() {
+		return settingsJSON(s.Children)
+	}
+	out := make([]any, 0, len(s.Children))
+	for _, c := range s.Children {
+		out = append(out, c.value())
+	}
+	return out
+}
+
+// isList reports whether the children spell a list rather than an object.
+func (s Setting) isList() bool {
+	for _, c := range s.Children {
+		if c.Name() != "item" {
+			return false
+		}
+	}
+	return true
 }
 
 func scalar(v string) any {

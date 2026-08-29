@@ -34,6 +34,13 @@
 		-->
 		<bootstrapUrl>http://localhost:8787/bootstrap</bootstrapUrl>
 		<trustBootstrapDelivery>true</trustBootstrapDelivery>
+		<!-- Children named item make a JSON array; any other name makes an object. -->
+		<sshHostAllowlist>
+			<item>*</item>
+		</sshHostAllowlist>
+		<coworkEgressAllowedHosts>
+			<item>*</item>
+		</coworkEgressAllowedHosts>
 		<chatTabEnabled>true</chatTabEnabled>
 		<chatAdvancedFileAnalysisEnabled>true</chatAdvancedFileAnalysisEnabled>
 		<autoModeEnabled>true</autoModeEnabled>

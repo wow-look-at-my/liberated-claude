@@ -103,6 +103,8 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", s.handleAuthServerMetadata)
 	mux.HandleFunc("GET /oauth/authorize", s.handleAuthorize)
+	mux.HandleFunc("POST /oauth/device_authorization", s.handleDeviceAuthorization)
+	mux.HandleFunc("GET /oauth/device", s.handleDeviceVerification)
 	mux.HandleFunc("POST /oauth/token", s.handleToken)
 	mux.HandleFunc("/.well-known/", handleWellKnown)
 	return s.logRequests(s.authenticate(mux))

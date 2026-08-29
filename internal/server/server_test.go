@@ -200,6 +200,65 @@ func TestCodeIsRedeemableOnlyOnce(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, out.Code, "an unknown code must be refused")
 }
 
+// Claude Desktop signs in with the device grant, so the metadata has to
+// advertise the endpoint and the poll has to end at a usable bearer.
+func TestDeviceGrantIssuesAUsableBearerToken(t *testing.T) {
+	h := newTestServer(t)
+
+	meta := do(t, h, http.MethodGet, "/.well-known/oauth-authorization-server", "")
+	var doc map[string]any
+	require.NoError(t, json.NewDecoder(meta.Body).Decode(&doc), "metadata should decode")
+	assert.Contains(t, doc, "device_authorization_endpoint", "the device endpoint must be advertised")
+	assert.Contains(t, doc["grant_types_supported"], "urn:ietf:params:oauth:grant-type:device_code",
+		"the device grant must be advertised")
+
+	init := httptest.NewRequest(http.MethodPost, "/oauth/device_authorization", strings.NewReader(""))
+	init.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	initRec := httptest.NewRecorder()
+	h.ServeHTTP(initRec, init)
+	require.Equal(t, http.StatusOK, initRec.Code, "device init should succeed")
+
+	var grant map[string]any
+	require.NoError(t, json.NewDecoder(initRec.Body).Decode(&grant), "device init should decode")
+	deviceCode, _ := grant["device_code"].(string)
+	require.NotEmpty(t, deviceCode, "a device code should be issued")
+	require.NotEmpty(t, grant["user_code"], "a user code should be issued")
+	require.NotEmpty(t, grant["verification_uri"], "a verification URI is required")
+	require.NotEmpty(t, grant["verification_uri_complete"], "the complete URI carries the code")
+
+	form := url.Values{}
+	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
+	form.Set("device_code", deviceCode)
+	poll := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+	poll.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	pollRec := httptest.NewRecorder()
+	h.ServeHTTP(pollRec, poll)
+	require.Equal(t, http.StatusOK, pollRec.Code, "the first poll should succeed")
+
+	var tok map[string]any
+	require.NoError(t, json.NewDecoder(pollRec.Body).Decode(&tok), "token response should decode")
+	got, ok := tok["access_token"].(string)
+	require.True(t, ok, "access_token should be a string")
+
+	models := do(t, h, http.MethodGet, "/v1/models", got)
+	assert.Equal(t, http.StatusOK, models.Code, "the issued token should authenticate a real request")
+}
+
+func TestDeviceGrantRejectsUnknownCode(t *testing.T) {
+	form := url.Values{}
+	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
+	form.Set("device_code", "never-issued")
+	req := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	newTestServer(t).ServeHTTP(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code, "an unknown device code must be refused")
+
+	var body map[string]any
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&body), "error body should decode")
+	assert.Equal(t, "expired_token", body["error"], "the poller expects an OAuth error code")
+}
+
 func TestAuthorizeRefusesOffHostRedirect(t *testing.T) {
 	q := url.Values{}
 	q.Set("response_type", "code")

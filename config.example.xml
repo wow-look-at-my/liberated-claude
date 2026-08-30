@@ -14,17 +14,83 @@
 <liberatedClaude>
 	<server>
 		<listen>127.0.0.1:8787</listen>
-		<publicURL>http://127.0.0.1:8787</publicURL>
+		<!--
+		  Claude Desktop deletes a loopback or non-https inferenceGatewayBaseUrl
+		  from a fetched document, so a gateway that advertises itself needs a
+		  non-loopback name over TLS. gateway.localtest.me resolves to 127.0.0.1
+		  from public DNS, which gets that without an /etc/hosts entry; mkcert
+		  issues a certificate the system already trusts:
+
+		    mkcert -cert-file certs/gateway.pem -key-file certs/gateway-key.pem \
+		        gateway.localtest.me localhost 127.0.0.1 ::1
+
+		  The loopback names belong in that list too. The same listener answers
+		  to all four, and a client dialling it as localhost checks the name
+		  against the certificate like any other host.
+		-->
+		<publicURL>https://gateway.localtest.me:8787</publicURL>
 		<apiKey>${LIBERATED_CLAUDE_KEY}</apiKey>
+		<tlsCert>certs/gateway.pem</tlsCert>
+		<tlsKey>certs/gateway-key.pem</tlsKey>
 	</server>
 
+	<!--
+	  Element names are Claude Desktop's own setting keys and are sent through
+	  untranslated. "true" and "false" become JSON booleans; every other value is
+	  sent as a string. An element left out is not sent at all, so the app keeps
+	  its own default rather than being forced to false.
+	-->
 	<bootstrap>
 		<deploymentDisplayName>Liberated Claude</deploymentDisplayName>
+		<!--
+		  The overlay carries the delivery settings that fetched it, so applying
+		  it does not drop the pull. bootstrapUrl is the flat key for
+		  bootstrap.url; trustBootstrapDelivery skips the per-user consent prompt
+		  for sign-in targets, helper scripts and connectors this server sends.
+		-->
+		<bootstrapUrl>https://gateway.localtest.me:8787/bootstrap</bootstrapUrl>
+		<trustBootstrapDelivery>true</trustBootstrapDelivery>
+		<!-- Children named item make a JSON array; any other name makes an object. -->
+		<sshHostAllowlist>
+			<item>*</item>
+		</sshHostAllowlist>
+		<coworkEgressAllowedHosts>
+			<item>*</item>
+		</coworkEgressAllowedHosts>
 		<chatTabEnabled>true</chatTabEnabled>
+		<chatAdvancedFileAnalysisEnabled>true</chatAdvancedFileAnalysisEnabled>
 		<autoModeEnabled>true</autoModeEnabled>
 		<toolSearchEnabled>true</toolSearchEnabled>
-		<preferOneMContext>true</preferOneMContext>
-		<disableTelemetry>true</disableTelemetry>
+		<isDesktopExtensionEnabled>true</isDesktopExtensionEnabled>
+		<!--
+		  Two spellings of one setting. disableDeploymentModeChooser is its flat
+		  key; the authentication element is the same setting in the app's v2
+		  nested shape, which the app flattens back to that key. Either is
+		  accepted, and a nested element switches the whole document to v2
+		  intake, where unrecognized keys are passed through untouched.
+
+		  True hides the Claude.ai login option, which also removes the sign-in
+		  that Claude.ai data import depends on.
+		-->
+		<disableDeploymentModeChooser>false</disableDeploymentModeChooser>
+		<authentication>
+			<disableClaudeAiSignIn>false</disableClaudeAiSignIn>
+		</authentication>
+		<modelPrefer1mContext>true</modelPrefer1mContext>
+		<!--
+		  enabled on its own imports from Claude.ai through the app's own
+		  endpoints. url, oauthIssuer and oauthClientId override that with a
+		  self-hosted export service and are set together or left entirely empty;
+		  the app refuses the override when oauthIssuer is an Anthropic host.
+		-->
+		<claudeAiImport>
+			<enabled>true</enabled>
+			<automatic3pImport>true</automatic3pImport>
+			<exportEnabled>true</exportEnabled>
+			<bannerBehavior>detect</bannerBehavior>
+		</claudeAiImport>
+		<disableEssentialTelemetry>true</disableEssentialTelemetry>
+		<disableNonessentialTelemetry>true</disableNonessentialTelemetry>
 	</bootstrap>
 
 	<providers>

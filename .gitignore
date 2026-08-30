@@ -7,3 +7,4 @@ config.xml
 build_output.txt
 *.output
 /logs/
+/certs/

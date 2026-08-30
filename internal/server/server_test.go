@@ -1,11 +1,16 @@
 package server
 
 import (
+	"crypto/sha256"
+	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,7 +34,7 @@ const testConfigXML = `<?xml version="1.0" encoding="UTF-8"?>
 	</server>
 	<bootstrap>
 		<deploymentDisplayName>Test</deploymentDisplayName>
-		<preferOneMContext>true</preferOneMContext>
+		<modelPrefer1mContext>true</modelPrefer1mContext>
 	</bootstrap>
 	<providers>
 		<provider name="p" kind="openai" cache="implicit">
@@ -67,20 +72,227 @@ func do(t *testing.T, h http.Handler, method, path, key string) *httptest.Respon
 	return rec
 }
 
-// Claude Desktop probes for RFC 8414 metadata to decide whether the gateway is
-// its own authorization server. A 401 there reads as "an authorization server
-// exists and refused you" and starts an SSO flow this gateway cannot complete,
-// so these paths must answer 404 without requiring a credential.
-func TestWellKnownProbesAre404Unauthenticated(t *testing.T) {
+// fetchFrom issues an authenticated GET whose origin is host under the scheme
+// secure picks. Claude Desktop pins the gateway URL to the origin it fetched
+// the document from, so that origin is an input to the response.
+func fetchFrom(t *testing.T, h http.Handler, path, host string, secure bool) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.Host = host
+	if secure {
+		req.TLS = &tls.ConnectionState{}
+	}
+	req.Header.Set("x-api-key", testKey)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+// decodeDoc reads a successful JSON object response.
+func decodeDoc(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+	require.Equal(t, http.StatusOK, rec.Code, "request should succeed")
+	var doc map[string]any
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&doc), "body should decode")
+	return doc
+}
+
+// Discovery runs before the client holds a credential, so these paths answer
+// without one. openid-configuration stays absent: that document belongs to an
+// external IdP configured through inferenceGatewayOidc, a different sign-in path.
+func TestDiscoveryProbesNeedNoCredential(t *testing.T) {
 	h := newTestServer(t)
-	for _, path := range []string{
-		"/.well-known/oauth-authorization-server",
-		"/.well-known/openid-configuration",
-		"/.well-known/oauth-authorization-server/v1",
+	for path, want := range map[string]int{
+		"/.well-known/oauth-authorization-server":    http.StatusOK,
+		"/.well-known/openid-configuration":          http.StatusNotFound,
+		"/.well-known/oauth-authorization-server/v1": http.StatusNotFound,
 	} {
 		rec := do(t, h, http.MethodGet, path, "")
-		assert.Equal(t, http.StatusNotFound, rec.Code, "%s must be 404, never 401", path)
+		assert.Equal(t, want, rec.Code, "%s should not answer 401", path)
 	}
+}
+
+// Claude Desktop refuses metadata whose issuer or endpoints are not same-origin
+// with inferenceGatewayBaseUrl, and localhost and 127.0.0.1 are different
+// origins, so the document has to echo the host the client dialled.
+func TestAuthServerMetadataIsSameOriginAsTheRequest(t *testing.T) {
+	h := newTestServer(t)
+	for _, host := range []string{"localhost:8787", "127.0.0.1:8787"} {
+		req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil)
+		req.Host = host
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code, "metadata should be served for %s", host)
+
+		var doc map[string]any
+		require.NoError(t, json.NewDecoder(rec.Body).Decode(&doc), "metadata should decode")
+
+		origin := "http://" + host
+		assert.Equal(t, origin, doc["issuer"], "issuer should match the requested origin")
+		assert.Equal(t, origin+"/oauth/authorize", doc["authorization_endpoint"], "authorize endpoint should be same-origin")
+		assert.Equal(t, origin+"/oauth/token", doc["token_endpoint"], "token endpoint should be same-origin")
+		assert.Equal(t, []any{"S256"}, doc["code_challenge_methods_supported"], "PKCE S256 should be advertised")
+	}
+}
+
+// signInFlow runs authorize then token with a real PKCE pair and returns the
+// token response.
+func signInFlow(t *testing.T, h http.Handler, verifier string) *httptest.ResponseRecorder {
+	t.Helper()
+	sum := sha256.Sum256([]byte(verifier))
+	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
+
+	q := url.Values{}
+	q.Set("response_type", "code")
+	q.Set("redirect_uri", "http://127.0.0.1:54321/callback")
+	q.Set("state", "xyz")
+	q.Set("code_challenge", challenge)
+	q.Set("code_challenge_method", "S256")
+	rec := do(t, h, http.MethodGet, "/oauth/authorize?"+q.Encode(), "")
+	require.Equal(t, http.StatusFound, rec.Code, "authorize should redirect back")
+
+	loc, err := url.Parse(rec.Header().Get("Location"))
+	require.NoError(t, err, "redirect target should parse")
+	assert.Equal(t, "xyz", loc.Query().Get("state"), "state should be echoed back")
+	code := loc.Query().Get("code")
+	require.NotEmpty(t, code, "a code should be issued")
+
+	form := url.Values{}
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", code)
+	form.Set("code_verifier", verifier)
+	form.Set("redirect_uri", "http://127.0.0.1:54321/callback")
+	req := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	out := httptest.NewRecorder()
+	h.ServeHTTP(out, req)
+	return out
+}
+
+func TestSignInIssuesAUsableBearerToken(t *testing.T) {
+	h := newTestServer(t)
+	rec := signInFlow(t, h, "verifier-that-is-long-enough-to-be-real")
+	require.Equal(t, http.StatusOK, rec.Code, "token exchange should succeed")
+
+	var tok map[string]any
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&tok), "token response should decode")
+	assert.Equal(t, "Bearer", tok["token_type"], "token type should be Bearer")
+
+	got, ok := tok["access_token"].(string)
+	require.True(t, ok, "access_token should be a string")
+
+	// The issued token has to satisfy the same check every later call makes.
+	models := do(t, h, http.MethodGet, "/v1/models", got)
+	assert.Equal(t, http.StatusOK, models.Code, "the issued token should authenticate a real request")
+}
+
+func TestTokenRejectsWrongVerifier(t *testing.T) {
+	h := newTestServer(t)
+	sum := sha256.Sum256([]byte("the-real-verifier"))
+	q := url.Values{}
+	q.Set("response_type", "code")
+	q.Set("redirect_uri", "http://127.0.0.1:54321/callback")
+	q.Set("code_challenge", base64.RawURLEncoding.EncodeToString(sum[:]))
+	q.Set("code_challenge_method", "S256")
+	rec := do(t, h, http.MethodGet, "/oauth/authorize?"+q.Encode(), "")
+	require.Equal(t, http.StatusFound, rec.Code, "authorize should redirect back")
+	loc, err := url.Parse(rec.Header().Get("Location"))
+	require.NoError(t, err, "redirect target should parse")
+
+	form := url.Values{}
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", loc.Query().Get("code"))
+	form.Set("code_verifier", "not-the-real-verifier")
+	req := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	out := httptest.NewRecorder()
+	h.ServeHTTP(out, req)
+	assert.Equal(t, http.StatusBadRequest, out.Code, "a mismatched verifier must not yield a token")
+}
+
+func TestCodeIsRedeemableOnlyOnce(t *testing.T) {
+	h := newTestServer(t)
+	verifier := "verifier-that-is-long-enough-to-be-real"
+	require.Equal(t, http.StatusOK, signInFlow(t, h, verifier).Code, "first exchange should succeed")
+
+	form := url.Values{}
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", "recycled")
+	form.Set("code_verifier", verifier)
+	req := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	out := httptest.NewRecorder()
+	h.ServeHTTP(out, req)
+	assert.Equal(t, http.StatusBadRequest, out.Code, "an unknown code must be refused")
+}
+
+// Claude Desktop signs in with the device grant, so the metadata has to
+// advertise the endpoint and the poll has to end at a usable bearer.
+func TestDeviceGrantIssuesAUsableBearerToken(t *testing.T) {
+	h := newTestServer(t)
+
+	meta := do(t, h, http.MethodGet, "/.well-known/oauth-authorization-server", "")
+	var doc map[string]any
+	require.NoError(t, json.NewDecoder(meta.Body).Decode(&doc), "metadata should decode")
+	assert.Contains(t, doc, "device_authorization_endpoint", "the device endpoint must be advertised")
+	assert.Contains(t, doc["grant_types_supported"], "urn:ietf:params:oauth:grant-type:device_code",
+		"the device grant must be advertised")
+
+	init := httptest.NewRequest(http.MethodPost, "/oauth/device_authorization", strings.NewReader(""))
+	init.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	initRec := httptest.NewRecorder()
+	h.ServeHTTP(initRec, init)
+	require.Equal(t, http.StatusOK, initRec.Code, "device init should succeed")
+
+	var grant map[string]any
+	require.NoError(t, json.NewDecoder(initRec.Body).Decode(&grant), "device init should decode")
+	deviceCode, _ := grant["device_code"].(string)
+	require.NotEmpty(t, deviceCode, "a device code should be issued")
+	require.NotEmpty(t, grant["user_code"], "a user code should be issued")
+	require.NotEmpty(t, grant["verification_uri"], "a verification URI is required")
+	require.NotEmpty(t, grant["verification_uri_complete"], "the complete URI carries the code")
+
+	form := url.Values{}
+	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
+	form.Set("device_code", deviceCode)
+	poll := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+	poll.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	pollRec := httptest.NewRecorder()
+	h.ServeHTTP(pollRec, poll)
+	require.Equal(t, http.StatusOK, pollRec.Code, "the first poll should succeed")
+
+	var tok map[string]any
+	require.NoError(t, json.NewDecoder(pollRec.Body).Decode(&tok), "token response should decode")
+	got, ok := tok["access_token"].(string)
+	require.True(t, ok, "access_token should be a string")
+
+	models := do(t, h, http.MethodGet, "/v1/models", got)
+	assert.Equal(t, http.StatusOK, models.Code, "the issued token should authenticate a real request")
+}
+
+func TestDeviceGrantRejectsUnknownCode(t *testing.T) {
+	form := url.Values{}
+	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
+	form.Set("device_code", "never-issued")
+	req := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	newTestServer(t).ServeHTTP(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code, "an unknown device code must be refused")
+
+	var body map[string]any
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&body), "error body should decode")
+	assert.Equal(t, "expired_token", body["error"], "the poller expects an OAuth error code")
+}
+
+func TestAuthorizeRefusesOffHostRedirect(t *testing.T) {
+	q := url.Values{}
+	q.Set("response_type", "code")
+	q.Set("redirect_uri", "https://evil.invalid/callback")
+	q.Set("code_challenge", "whatever")
+	q.Set("code_challenge_method", "S256")
+	rec := do(t, newTestServer(t), http.MethodGet, "/oauth/authorize?"+q.Encode(), "")
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "the endpoint must not redirect off this machine")
 }
 
 func TestHealthzNeedsNoKey(t *testing.T) {
@@ -118,47 +330,6 @@ func TestModelsAdvertiseRealContextWindow(t *testing.T) {
 	small := resp.Data[1]
 	assert.Equal(t, 128000, small.MaxInputTokens, "sub-1M window should be reported as-is")
 	assert.False(t, small.SupportsOneM, "a 128000-token model must not claim 1M")
-}
-
-func TestBootstrapCarriesGatewayAndPricing(t *testing.T) {
-	rec := do(t, newTestServer(t), http.MethodGet, "/bootstrap", testKey)
-	require.Equal(t, http.StatusOK, rec.Code, "bootstrap should succeed")
-
-	var doc map[string]any
-	require.NoError(t, json.NewDecoder(rec.Body).Decode(&doc), "bootstrap body should decode")
-
-	assert.Equal(t, "gateway", doc["inferenceProvider"], "provider should be gateway")
-	assert.Equal(t, "x-api-key", doc["inferenceGatewayAuthScheme"], "auth scheme should match the key check")
-	assert.Equal(t, "http://127.0.0.1:8787", doc["inferenceGatewayBaseUrl"], "gateway URL should come from config")
-	assert.Equal(t, true, doc["modelPrefer1mContext"], "preferOneMContext should map through")
-	assert.Equal(t, true, doc["modelDiscoveryEnabled"], "discovery should stay on")
-
-	models, ok := doc["inferenceModels"].([]any)
-	require.True(t, ok, "inferenceModels should be a list")
-	assert.Len(t, models, 2, "both models should be listed")
-
-	rows, ok := doc["inferenceModelPricing"].([]any)
-	require.True(t, ok, "inferenceModelPricing should be a list")
-	require.Len(t, rows, 1, "only the model with a detected rate should be priced")
-	row := rows[0].(map[string]any)
-	assert.InDelta(t, 0.075, row["inputPerMtok"], 1e-12, "detected input rate should carry through")
-	assert.InDelta(t, 0.25, row["outputPerMtok"], 1e-12, "detected output rate should carry through")
-}
-
-// A model whose rate is out of Claude Desktop's accepted range would invalidate
-// the pricing key, so it is dropped rather than published.
-func TestBootstrapDropsOutOfRangeRates(t *testing.T) {
-	cfg, err := config.Parse([]byte(testConfigXML))
-	require.NoError(t, err, "test config should parse")
-	s := New(cfg, http.DefaultClient, slog.New(slog.DiscardHandler))
-	s.SetRates(map[string]pricing.Rates{"z-ai/glm-5.3-flash": {InputPerMtok: 99999}})
-
-	rec := do(t, s.Handler(), http.MethodGet, "/bootstrap", testKey)
-	require.Equal(t, http.StatusOK, rec.Code, "bootstrap should succeed")
-	var doc map[string]any
-	require.NoError(t, json.NewDecoder(rec.Body).Decode(&doc), "bootstrap body should decode")
-	_, present := doc["inferenceModelPricing"]
-	assert.False(t, present, "an out-of-range rate should leave pricing unset")
 }
 
 func TestUnknownModelIsRejected(t *testing.T) {

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"slices"
 	"strings"
 
+	"github.com/wow-look-at-my/go-containers/set"
 	"github.com/wow-look-at-my/liberated-claude/internal/alias"
 )
 
@@ -64,19 +64,9 @@ type Server struct {
 	APIKey string `xml:"apiKey"`
 	// PublicURL is written to bootstrap as inferenceGatewayBaseUrl.
 	PublicURL string `xml:"publicURL"`
-}
-
-// Bootstrap carries the parts of the config overlay that are not derived from
-// the provider list. Every field maps to a documented Claude Desktop setting.
-type Bootstrap struct {
-	DeploymentDisplayName string `xml:"deploymentDisplayName"`
-	ChatTabEnabled        *bool  `xml:"chatTabEnabled"`
-	AutoModeEnabled       *bool  `xml:"autoModeEnabled"`
-	ToolSearchEnabled     *bool  `xml:"toolSearchEnabled"`
-	// PreferOneMContext picks the 1M variant by default (maps to modelPrefer1mContext).
-	PreferOneMContext *bool `xml:"preferOneMContext"`
-	// DisableTelemetry sets both telemetry keys the app understands.
-	DisableTelemetry *bool `xml:"disableTelemetry"`
+	// TLSCert and TLSKey turn the listener into HTTPS when both are set.
+	TLSCert string `xml:"tlsCert"`
+	TLSKey  string `xml:"tlsKey"`
 }
 
 // Provider is one upstream API and the models reachable through it.
@@ -191,11 +181,12 @@ func expandRefs(s string) (string, []string) {
 // first-seen order and without repeats.
 func expandFields(fields []*string) []string {
 	var missing []string
+	seen := set.New[string]()
 	for _, f := range fields {
 		v, names := expandRefs(*f)
 		*f = v
 		for _, n := range names {
-			if !slices.Contains(missing, n) {
+			if seen.Add(n) {
 				missing = append(missing, n)
 			}
 		}
@@ -267,6 +258,9 @@ func (c *Config) expand() error {
 func (c *Config) validate() error {
 	if c.Server.Listen == "" {
 		return fmt.Errorf("server.listen is required")
+	}
+	if err := c.Bootstrap.validateImport(); err != nil {
+		return err
 	}
 	if len(c.Providers) == 0 {
 		if len(c.Skipped) > 0 {

@@ -252,8 +252,7 @@ func reqUserMessages(msg wire.Message, mode config.CacheMode) ([]wire.OAMessage,
 				textParts = nil
 			}
 
-			// Extract text from tool_result content.
-			toolResultText, err := reqExtractToolResultText(block.Content)
+			toolResultContent, err := reqToolResultContent(block.Content, mode)
 			if err != nil {
 				return nil, err
 			}
@@ -262,7 +261,7 @@ func reqUserMessages(msg wire.Message, mode config.CacheMode) ([]wire.OAMessage,
 			result = append(result, wire.OAMessage{
 				Role:       "tool",
 				ToolCallID: block.ToolUseID,
-				Content:    jsonString(toolResultText),
+				Content:    toolResultContent,
 			})
 		}
 	}
@@ -310,30 +309,67 @@ func reqImagePart(block wire.ContentBlock, mode config.CacheMode) (wire.OAConten
 	return part, nil
 }
 
-// reqExtractToolResultText extracts text from tool_result content (string or array).
-func reqExtractToolResultText(content json.RawMessage) (string, error) {
+// reqToolResultContent converts tool_result content (string or array) into the
+// content of an OpenAI tool message. Text-only results collapse to a bare
+// string, which is what the Chat Completions tool role expects. A result
+// carrying an image becomes an array of parts, since a data URL cannot survive
+// the collapse to text.
+func reqToolResultContent(content json.RawMessage, mode config.CacheMode) (json.RawMessage, error) {
 	if len(content) == 0 {
-		return "", nil
+		return jsonString(""), nil
 	}
 
 	// Try array of ContentBlock.
 	var blocks []wire.ContentBlock
 	if err := json.Unmarshal(content, &blocks); err == nil {
-		var texts []string
-		for _, block := range blocks {
-			if block.Type == "text" && block.Text != "" {
-				texts = append(texts, block.Text)
-			}
-		}
-		return strings.Join(texts, "\n\n"), nil
+		return reqToolResultParts(blocks, mode)
 	}
 
 	// Try bare string.
 	var s string
 	if err := json.Unmarshal(content, &s); err != nil {
-		return "", fmt.Errorf("tool_result content is neither string nor array: %w", err)
+		return nil, fmt.Errorf("tool_result content is neither string nor array: %w", err)
 	}
-	return s, nil
+	return jsonString(s), nil
+}
+
+// reqToolResultParts renders the blocks of an array-form tool_result, keeping
+// images alongside text and in their original order.
+func reqToolResultParts(blocks []wire.ContentBlock, mode config.CacheMode) (json.RawMessage, error) {
+	var parts []wire.OAContentPart
+	var texts []string
+	hasImage := false
+
+	for _, block := range blocks {
+		if block.Type == "text" {
+			if block.Text == "" {
+				continue // an empty text block contributes nothing either way
+			}
+			texts = append(texts, block.Text)
+			parts = append(parts, wire.OAContentPart{Type: "text", Text: block.Text})
+			continue
+		}
+		if block.Type != "image" {
+			continue
+		}
+
+		part, err := reqImagePart(block, mode)
+		if err != nil {
+			return nil, err
+		}
+		parts = append(parts, part)
+		hasImage = true
+	}
+
+	if !hasImage {
+		return jsonString(strings.Join(texts, "\n\n")), nil
+	}
+
+	out, err := json.Marshal(parts)
+	if err != nil {
+		return nil, fmt.Errorf("marshal tool_result parts: %w", err)
+	}
+	return out, nil
 }
 
 // reqBuildUserMessage builds an OAMessage from text and image parts.

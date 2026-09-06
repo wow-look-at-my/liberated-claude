@@ -2,7 +2,7 @@ package wire
 
 import "encoding/json"
 
-// OAContentPart is one part of a multimodal OpenAI message.
+// OAContentPart is a part of a multimodal OpenAI message.
 // CacheControl (non-standard) allows cache_control translation by some gateways.
 type OAContentPart struct {
 	Type         string          `json:"type"`
@@ -11,7 +11,7 @@ type OAContentPart struct {
 	CacheControl *CacheControl   `json:"cache_control,omitempty"`
 }
 
-// OAMessage is one OpenAI chat message (Content raw: API accepts string or parts).
+// OAMessage is an OpenAI chat message (Content raw: API accepts string or parts).
 type OAMessage struct {
 	Role       string          `json:"role"`
 	Content    json.RawMessage `json:"content,omitempty"`
@@ -25,7 +25,7 @@ type OAMessage struct {
 }
 
 // ReasoningText returns the chain-of-thought under whichever field name the
-// provider used. Reading one name only would lose reasoning that was billed.
+// provider used, so billed reasoning is never dropped.
 func (m *OAMessage) ReasoningText() string {
 	if m.ReasoningContent != "" {
 		return m.ReasoningContent

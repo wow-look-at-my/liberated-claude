@@ -1,11 +1,11 @@
-// Package wire holds the request and response shapes for the two APIs this
-// gateway bridges: the Anthropic Messages API that Claude Desktop speaks, and
-// the OpenAI Chat Completions API that most other providers speak.
+// Package wire holds the request and response shapes for the APIs this gateway
+// bridges: the Anthropic Messages API that Claude Desktop speaks, and the
+// OpenAI Chat Completions API that most other providers speak.
 //
-// Fields are pointers or omitempty wherever absence differs from a zero value,
-// so a request is forwarded with the same shape it arrived in. That matters
-// most for cache_control: an absent block and an empty one mean different
-// things to a provider that bills for cache writes.
+// Fields are pointers or omitempty wherever absence differs from an empty
+// value, so a request is forwarded with the same shape it arrived in. That
+// matters most for cache_control: an absent block and an empty block mean
+// different things to a provider that bills for cache writes.
 package wire
 
 import "encoding/json"
@@ -17,7 +17,7 @@ type CacheControl struct {
 	TTL string `json:"ttl,omitempty"`
 }
 
-// ContentBlock is one piece of message content. The Anthropic API allows text,
+// ContentBlock is a piece of message content. The Anthropic API allows text,
 // images, tool calls, tool results, and thinking blocks to share a list, so the
 // unrecognized fields are preserved verbatim via Extra.
 type ContentBlock struct {
@@ -38,7 +38,7 @@ type ContentBlock struct {
 	Signature string `json:"signature,omitempty"`
 }
 
-// Message is one turn in the conversation.
+// Message is a turn in the conversation.
 type Message struct {
 	Role string `json:"role"`
 	// Content is a bare string or list of ContentBlock (kept raw for transforms).
@@ -96,7 +96,7 @@ type MessagesResponse struct {
 	Usage        Usage          `json:"usage"`
 }
 
-// ModelInfo is one entry in /v1/models. SupportsOneM and MaxInputTokens
+// ModelInfo is an entry in /v1/models. SupportsOneM and MaxInputTokens
 // decide 1M-context offering; AnthropicFamilyTier is required by Desktop.
 type ModelInfo struct {
 	Type                string `json:"type"`

@@ -17,8 +17,6 @@ import (
 	"github.com/wow-look-at-my/liberated-claude/internal/config"
 )
 
-// throttleConfig builds a one-provider config pointed at upstream, with the
-// given concurrency cap.
 func throttleConfig(t *testing.T, upstream string, maxConcurrent int) *config.Config {
 	t.Helper()
 	raw := `<liberatedClaude>

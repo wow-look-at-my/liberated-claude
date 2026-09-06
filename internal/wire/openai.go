@@ -99,7 +99,6 @@ type OAPromptTokensDetails struct {
 	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
 }
 
-// OAChoice is one completion alternative.
 type OAChoice struct {
 	Index        int        `json:"index"`
 	Message      *OAMessage `json:"message,omitempty"`

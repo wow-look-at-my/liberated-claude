@@ -11,7 +11,6 @@ import (
 // perMessageOverhead is the framing each turn costs beyond its own text.
 const perMessageOverhead = 4
 
-// bpe is the shared cl100k_base tokenizer, built once and reused.
 var bpe = sync.OnceValues(tokenizer.New)
 
 // countInputTokens measures the prompt of a Messages request, for a provider

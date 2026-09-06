@@ -239,9 +239,6 @@ func TestExpandEnv(t *testing.T) {
 	})
 }
 
-// A provider whose key is absent must be dropped rather than advertised.
-// Claude Desktop probes a single model to validate the gateway, so one broken
-// provider fails setup for every provider.
 func TestProviderWithUnsetKeyIsSkippedNotFatal(t *testing.T) {
 	os.Unsetenv("NO_SUCH_ANTHROPIC_KEY")
 	t.Setenv("PRESENT_KEY", "real-key")
@@ -612,7 +609,6 @@ func TestParseExampleXML(t *testing.T) {
 		assert.True(t, alias.IsTier(model.Tier), fmt.Sprintf("model %q should have recognized tier, got %q", model.ID, model.Tier))
 	}
 
-	// Find the two flash models and verify they report SupportsOneM() == true
 	found := map[string]bool{
 		"z-ai/glm-5.3-flash":              false,
 		"deepseek/deepseek-v4-flash-0731": false,

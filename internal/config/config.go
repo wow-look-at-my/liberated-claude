@@ -48,9 +48,6 @@ type Config struct {
 	Skipped []SkippedProvider `xml:"-"`
 }
 
-// SkippedProvider is a provider dropped for unset ${VAR} references. Desktop
-// probes one model to validate the gateway, so a keyless provider fails setup
-// for all of them.
 type SkippedProvider struct {
 	Name    string
 	Missing []string
@@ -69,7 +66,6 @@ type Server struct {
 	TLSKey  string `xml:"tlsKey"`
 }
 
-// Provider is one upstream API and the models reachable through it.
 type Provider struct {
 	Name    string    `xml:"name,attr"`
 	Kind    Kind      `xml:"kind,attr"`
@@ -77,15 +73,12 @@ type Provider struct {
 	APIKey  string    `xml:"apiKey"`
 	Cache   CacheMode `xml:"cache,attr"`
 	// ReasoningField is the JSON key this provider uses for chain-of-thought.
-	ReasoningField string `xml:"reasoningField,attr"`
-	// MaxConcurrent caps in-flight upstream calls (0 means no cap).
-	MaxConcurrent int      `xml:"maxConcurrent,attr"`
-	Headers       []Header `xml:"headers>header"`
-	Models        []Model  `xml:"models>model"`
+	ReasoningField string   `xml:"reasoningField,attr"`
+	MaxConcurrent  int      `xml:"maxConcurrent,attr"`
+	Headers        []Header `xml:"headers>header"`
+	Models         []Model  `xml:"models>model"`
 }
 
-// The two spellings of the chain-of-thought field: DeepSeek uses the first,
-// OpenRouter and Ollama the second.
 const (
 	ReasoningContent = "reasoning_content"
 	Reasoning        = "reasoning"
@@ -98,19 +91,16 @@ type Header struct {
 	Value string `xml:",chardata"`
 }
 
-// Model is one entry in Claude Desktop's model picker.
 type Model struct {
 	// ID is the model name exactly as the upstream provider expects it.
 	ID string `xml:"id,attr"`
 	// Label is the display name shown in the picker.
 	Label string `xml:"label,attr"`
 	// Tier: sonnet, opus, haiku, fable, or mythos (required by Desktop).
-	Tier string `xml:"tier,attr"`
-	// TierDefault marks this model as the one a bare tier alias resolves to.
-	TierDefault bool `xml:"tierDefault,attr"`
+	Tier        string `xml:"tier,attr"`
+	TierDefault bool   `xml:"tierDefault,attr"`
 	// ContextWindow is the input-token capacity (1M-context offered if >= OneMThreshold).
-	ContextWindow int `xml:"contextWindow,attr"`
-	// MaxOutputTokens caps the response (zero leaves the request's own value).
+	ContextWindow   int `xml:"contextWindow,attr"`
 	MaxOutputTokens int `xml:"maxOutputTokens,attr"`
 	// Cache overrides the provider's cache mode for this model.
 	Cache CacheMode `xml:"cache,attr"`
@@ -133,9 +123,6 @@ func (m *Model) EffectiveCache() CacheMode {
 	return CacheNone
 }
 
-// ReasoningFieldName is the key a replayed assistant turn carries its
-// chain-of-thought under. Defaults to reasoning_content, the spelling whose
-// absence makes DeepSeek reject a multi-turn request outright.
 func (m *Model) ReasoningFieldName() string {
 	if m.provider != nil && m.provider.ReasoningField != "" {
 		return m.provider.ReasoningField
@@ -177,8 +164,6 @@ func expandRefs(s string) (string, []string) {
 	return out, missing
 }
 
-// expandFields expands every field in place and returns the unset names, in
-// first-seen order and without repeats.
 func expandFields(fields []*string) []string {
 	var missing []string
 	seen := set.New[string]()
@@ -333,7 +318,6 @@ func validateModel(p *Provider, m *Model, idx int, seenAlias map[string]string) 
 	default:
 		return fmt.Errorf("provider %q model %q: unknown cache mode %q", p.Name, m.ID, m.Cache)
 	}
-	// Shared advertised IDs make routing ambiguous (second shadows first).
 	a := m.AliasID()
 	if prev, dup := seenAlias[a]; dup {
 		return fmt.Errorf("model %q collides with %q: both advertise ID %q", m.ID, prev, a)

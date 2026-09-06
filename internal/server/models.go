@@ -23,7 +23,6 @@ func (s *Server) handleModels(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// modelInfo renders one configured model for discovery.
 func modelInfo(m *config.Model) wire.ModelInfo {
 	return wire.ModelInfo{
 		Type:                "model",
@@ -31,9 +30,8 @@ func modelInfo(m *config.Model) wire.ModelInfo {
 		DisplayName:         m.DisplayName(),
 		AnthropicFamilyTier: m.Tier,
 		IsFamilyDefault:     m.TierDefault,
-		// Both sent: supports_1m checked first; max_input_tokens for window size.
-		SupportsOneM:    m.SupportsOneM(),
-		MaxInputTokens:  m.ContextWindow,
-		MaxOutputTokens: m.MaxOutputTokens,
+		SupportsOneM:        m.SupportsOneM(),
+		MaxInputTokens:      m.ContextWindow,
+		MaxOutputTokens:     m.MaxOutputTokens,
 	}
 }

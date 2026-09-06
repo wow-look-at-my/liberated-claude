@@ -12,8 +12,6 @@ type Bootstrap struct {
 	Settings []Setting `xml:",any"`
 }
 
-// Setting is one overlay key. An element with child elements carries them in
-// Children and ignores Value; a leaf carries its text in Value.
 type Setting struct {
 	XMLName  xml.Name
 	Value    string    `xml:",chardata"`
@@ -36,8 +34,6 @@ func settingsJSON(settings []Setting) map[string]any {
 	return out
 }
 
-// value renders one setting: an array when every child is <item>, a nested
-// object when it has other children, a scalar otherwise.
 func (s Setting) value() any {
 	if len(s.Children) == 0 {
 		return scalar(strings.TrimSpace(s.Value))
@@ -101,12 +97,6 @@ func (s Setting) child(name string) string {
 	return ""
 }
 
-// validateImport enforces the two rules Claude Desktop applies to
-// claudeAiImport, so a rejected overlay surfaces here by name.
-//
-// The endpoint trio is an override for a self-hosted export service and is set
-// together or left entirely empty. Empty with enabled=true is the normal case:
-// the app imports from Claude.ai using its own endpoints.
 func (b Bootstrap) validateImport() error {
 	imp, ok := b.Find("claudeAiImport")
 	if !ok {

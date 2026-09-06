@@ -71,8 +71,6 @@ func TestEncodePassesThroughAcceptedIDs(t *testing.T) {
 	}
 }
 
-// A foreign token must not reappear in the encoded form. Hex uses only 0-9a-f,
-// so this holds structurally; the test pins it against a future encoding change.
 func TestEncodedFormContainsNoForeignToken(t *testing.T) {
 	for _, id := range rejectedUpstream {
 		enc := Encode(id)

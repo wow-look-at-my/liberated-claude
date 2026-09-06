@@ -8,9 +8,6 @@ import (
 	"github.com/wow-look-at-my/liberated-claude/internal/pricing"
 )
 
-// priceRow is one entry of Claude Desktop's inferenceModelPricing array. All
-// four rates are required per row and each must fall in [0, 10000]; a row
-// outside that range is rejected by the app.
 type priceRow struct {
 	Name              string  `json:"name"`
 	InputPerMtok      float64 `json:"inputPerMtok"`
@@ -19,7 +16,6 @@ type priceRow struct {
 	CacheWritePerMtok float64 `json:"cacheWritePerMtok"`
 }
 
-// modelEntry is one entry of Claude Desktop's inferenceModels array.
 type modelEntry struct {
 	Name                string `json:"name"`
 	LabelOverride       string `json:"labelOverride,omitempty"`
@@ -34,10 +30,6 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.bootstrapConfig(requestOrigin(r)))
 }
 
-// bootstrapConfig builds the overlay document for a client that fetched it from
-// origin. Keys the gateway derives are written first; the config's own
-// <bootstrap> keys are layered over them, so a deployment can override a
-// derived default without a code change.
 func (s *Server) bootstrapConfig(origin string) map[string]any {
 	out := map[string]any{
 		"inferenceProvider": "gateway",
@@ -47,13 +39,12 @@ func (s *Server) bootstrapConfig(origin string) map[string]any {
 	}
 	// inferenceGatewayBaseUrl is origin-pinned: remote intake deletes it, and
 	// the credential it carries, unless it names the origin the document was
-	// fetched from and is https on a non-loopback host. A loopback deployment
-	// carries these in its local config instead.
+	// fetched from and is https on a non-loopback host. Loopback deployments
+	// use local config.
 	if remoteSafeURL(origin) && s.cfg.Server.APIKey != "" {
 		out["inferenceGatewayBaseUrl"] = origin
 		out["inferenceGatewayApiKey"] = s.cfg.Server.APIKey
 		out["inferenceCredentialKind"] = "static"
-		// Desktop sends key as x-api-key (checked first by authenticate()).
 		out["inferenceGatewayAuthScheme"] = "x-api-key"
 	}
 	if rows := s.priceRows(); len(rows) > 0 {
@@ -125,8 +116,6 @@ func (s *Server) priceRows() []priceRow {
 	return out
 }
 
-// lookupRate finds a model's rate by upstream ID first, then by advertised ID,
-// since a detector keys its table by whatever the upstream API calls the model.
 func lookupRate(rates map[string]pricing.Rates, m *config.Model) (pricing.Rates, bool) {
 	if r, ok := rates[m.ID]; ok {
 		return r, true

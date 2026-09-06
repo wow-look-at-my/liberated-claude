@@ -55,11 +55,6 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]int{"input_tokens": count})
 }
 
-// upstreamCountTokens asks the provider to count, reporting whether it could.
-//
-// The first call decides for the provider: one that answers 404 or 405 has no
-// such endpoint, and is not asked again, so an unsupported upstream costs a
-// single probe rather than a wasted round trip on every turn.
 func (s *Server) upstreamCountTokens(r *http.Request, body []byte, m *config.Model) (int, bool) {
 	p := m.Provider()
 	if !s.countTokensSupported(p.Name) {

@@ -20,7 +20,6 @@ type Rates struct {
 	CacheWritePerMtok float64
 }
 
-// Valid returns true if all rate fields are in the range [0, 10000] and none is NaN or Inf.
 func (r Rates) Valid() bool {
 	rates := []float64{r.InputPerMtok, r.OutputPerMtok, r.CacheReadPerMtok, r.CacheWritePerMtok}
 	for _, rate := range rates {
@@ -34,12 +33,6 @@ func (r Rates) Valid() bool {
 	return true
 }
 
-// FetchOpenRouter retrieves model pricing from OpenRouter.
-// The pricing values in the response are strings holding USD per token;
-// they are converted to USD per million tokens for the returned Rates.
-// Missing cache_write pricing is treated as 0.
-// Negative or unparseable price strings are treated as 0 for that field.
-// Returns a map keyed by OpenRouter model id.
 func FetchOpenRouter(ctx context.Context, client *http.Client, baseURL string) (map[string]Rates, error) {
 	baseURL = strings.TrimSuffix(baseURL, "/")
 	url := baseURL + "/models"
@@ -84,10 +77,9 @@ func FetchOpenRouter(ctx context.Context, client *http.Client, baseURL string) (
 	result := make(map[string]Rates)
 	for _, model := range envelope.Data {
 		rates := Rates{
-			InputPerMtok:     parsePrice(model.Pricing.Prompt),
-			OutputPerMtok:    parsePrice(model.Pricing.Completion),
-			CacheReadPerMtok: parsePrice(model.Pricing.InputCacheRead),
-			// InputCacheWrite is frequently absent; treat as 0
+			InputPerMtok:      parsePrice(model.Pricing.Prompt),
+			OutputPerMtok:     parsePrice(model.Pricing.Completion),
+			CacheReadPerMtok:  parsePrice(model.Pricing.InputCacheRead),
 			CacheWritePerMtok: parsePrice(model.Pricing.InputCacheWrite),
 		}
 		result[model.ID] = rates
@@ -96,8 +88,6 @@ func FetchOpenRouter(ctx context.Context, client *http.Client, baseURL string) (
 	return result, nil
 }
 
-// parsePrice converts a USD-per-token string to USD-per-million-tokens.
-// Negative values and unparseable strings are treated as 0.
 func parsePrice(s string) float64 {
 	if s == "" {
 		return 0
@@ -112,9 +102,6 @@ func parsePrice(s string) float64 {
 	return f * 1e6
 }
 
-// FetchOllamaCloud retrieves model ids from Ollama Cloud.
-// Ollama Cloud publishes no per-token pricing information,
-// so all returned Rates are zero. The map is keyed by model id.
 func FetchOllamaCloud(ctx context.Context, client *http.Client, baseURL string) (map[string]Rates, error) {
 	baseURL = strings.TrimSuffix(baseURL, "/")
 	url := baseURL + "/models"

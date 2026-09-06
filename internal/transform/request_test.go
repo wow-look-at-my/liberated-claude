@@ -127,14 +127,21 @@ func TestAnthropicToOpenAI_ToolResultTextOnly(t *testing.T) {
 		{Type: "text", Text: "Line one"},
 		{Type: "text", Text: "Line two"},
 	}
-	resultJSON, _ := json.Marshal(resultContent)
+	resultJSON, err := json.Marshal(resultContent)
+	assert.NoError(t, err, "tool_result payload should marshal")
+	userContent, err := json.Marshal([]wire.ContentBlock{{
+		Type:      "tool_result",
+		ToolUseID: "tool_123",
+		Content:   resultJSON,
+	}})
+	assert.NoError(t, err, "tool_result block should marshal")
 
 	req := &wire.MessagesRequest{
 		Model: "claude-3-5-sonnet-20241022",
 		Messages: []wire.Message{
 			{
 				Role:    "user",
-				Content: json.RawMessage([]byte(`[{"type":"tool_result","tool_use_id":"tool_123","content":` + string(resultJSON) + `}]`)),
+				Content: userContent,
 			},
 		},
 		MaxTokens: 1024,
@@ -381,7 +388,6 @@ func TestAnthropicToOpenAI_MaxTokensNoModel(t *testing.T) {
 	m := &config.Model{
 		ID:            "claude-3-5-sonnet-20241022",
 		ContextWindow: 200000,
-		// MaxOutputTokens is 0, so no clamping.
 	}
 
 	out, err := AnthropicToOpenAI(req, m)

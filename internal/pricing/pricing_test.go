@@ -167,7 +167,6 @@ func TestFetchOpenRouterHappyPath(t *testing.T) {
 
 	assert.Equal(t, 2, len(result), "should return two models")
 
-	// Per-token to per-Mtok: 0.000000075 * 1e6 = 0.075 (tolerance for FP precision).
 	const tol = 1e-12
 
 	glm := result["z-ai/glm-5.3-flash"]
@@ -333,7 +332,6 @@ func TestFetchOllamaCloudHappyPath(t *testing.T) {
 
 	assert.Equal(t, 2, len(result), "should return two models")
 
-	// All rates should be zero
 	glm := result["glm-5.3-flash"]
 	assert.Equal(t, Rates{}, glm, "model should have all-zero Rates")
 

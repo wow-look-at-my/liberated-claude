@@ -100,9 +100,6 @@ func AnthropicToOpenAI(req *wire.MessagesRequest, m *config.Model) (*wire.OARequ
 	return out, nil
 }
 
-// jsonString encodes s as a JSON string. Go's %q verb is not a substitute: it
-// escapes control bytes as \xNN, which JSON has no such escape for, so a tool
-// result carrying one produced a body no decoder would accept.
 func jsonString(s string) json.RawMessage {
 	// json.Marshal of a string cannot fail; any input is representable.
 	b, _ := json.Marshal(s)
@@ -246,7 +243,6 @@ func reqUserMessages(msg wire.Message, mode config.CacheMode) ([]wire.OAMessage,
 			}
 			textParts = append(textParts, part)
 		} else if block.Type == "tool_result" {
-			// Emit accumulated text/images as a message first if any.
 			if len(textParts) > 0 {
 				result = append(result, reqBuildUserMessage(textParts, mode))
 				textParts = nil

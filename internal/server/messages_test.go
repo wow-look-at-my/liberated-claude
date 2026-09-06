@@ -77,13 +77,38 @@ func modelRef(t *testing.T) string {
 	return m.AliasID()
 }
 
+// userBody marshals a Messages API request carrying content as the sole user turn.
+func userBody(t *testing.T, maxTokens int, stream bool, content any) string {
+	t.Helper()
+	req := map[string]any{
+		"model":      modelRef(t),
+		"max_tokens": maxTokens,
+		"messages":   []any{map[string]any{"role": "user", "content": content}},
+	}
+	if stream {
+		req["stream"] = true
+	}
+	b, err := json.Marshal(req)
+	require.NoError(t, err, "request body should marshal")
+	return string(b)
+}
+
+// cachedTextContent is a text block Claude Desktop marked as a cache breakpoint.
+func cachedTextContent() any {
+	return []any{map[string]any{
+		"type":          "text",
+		"text":          "big",
+		"cache_control": map[string]any{"type": "ephemeral"},
+	}}
+}
+
 func TestProxyOpenAITranslatesReplyAndCacheUsage(t *testing.T) {
 	f := newProxyFixture(t, "openai", "implicit", func(w http.ResponseWriter) {
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"id":"cc-1","choices":[{"index":0,"message":{"role":"assistant","content":"hi there"},"finish_reason":"stop"}],"usage":{"prompt_tokens":100,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":80}}}`)
 	})
 
-	body := fmt.Sprintf(`{"model":%q,"max_tokens":50,"messages":[{"role":"user","content":"hi"}]}`, modelRef(t))
+	body := userBody(t, 50, false, "hi")
 	rec := f.post(t, body)
 	require.Equal(t, http.StatusOK, rec.Code, "proxy should succeed")
 
@@ -102,7 +127,6 @@ func TestProxyOpenAITranslatesReplyAndCacheUsage(t *testing.T) {
 	require.Len(t, got.Content, 1, "one text block expected")
 	assert.Equal(t, "hi there", got.Content[0].Text, "text should carry through")
 
-	// Anthropic input_tokens excludes cache hits (80 cached of 100 leaves 20 billed).
 	assert.Equal(t, 20, got.Usage.InputTokens, "cached tokens must be subtracted from input")
 	require.NotNil(t, got.Usage.CacheReadInputTokens, "cache reads should be reported")
 	assert.Equal(t, 80, *got.Usage.CacheReadInputTokens, "cache read count should carry through")
@@ -114,7 +138,7 @@ func TestProxyOpenAIStripsCacheControlWhenImplicit(t *testing.T) {
 	f := newProxyFixture(t, "openai", "implicit", func(w http.ResponseWriter) {
 		io.WriteString(w, `{"id":"c","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`)
 	})
-	body := fmt.Sprintf(`{"model":%q,"max_tokens":10,"messages":[{"role":"user","content":[{"type":"text","text":"big","cache_control":{"type":"ephemeral"}}]}]}`, modelRef(t))
+	body := userBody(t, 10, false, cachedTextContent())
 	require.Equal(t, http.StatusOK, f.post(t, body).Code, "proxy should succeed")
 	assert.NotContains(t, string(f.gotBody), "cache_control",
 		"implicit caching must not forward cache_control")
@@ -126,7 +150,7 @@ func TestProxyAnthropicPreservesCacheControl(t *testing.T) {
 	f := newProxyFixture(t, "anthropic", "explicit", func(w http.ResponseWriter) {
 		io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","content":[],"usage":{"input_tokens":1,"output_tokens":1}}`)
 	})
-	body := fmt.Sprintf(`{"model":%q,"max_tokens":10,"messages":[{"role":"user","content":[{"type":"text","text":"big","cache_control":{"type":"ephemeral"}}]}]}`, modelRef(t))
+	body := userBody(t, 10, false, cachedTextContent())
 	require.Equal(t, http.StatusOK, f.post(t, body).Code, "proxy should succeed")
 
 	assert.Equal(t, "/v1/messages", f.gotPath, "Anthropic providers take the messages path")
@@ -141,7 +165,7 @@ func TestProxyStreamingEmitsAnthropicEvents(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		io.WriteString(w, "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hel\"}}]}\n\ndata: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":2}}\n\ndata: [DONE]\n\n")
 	})
-	body := fmt.Sprintf(`{"model":%q,"max_tokens":10,"stream":true,"messages":[{"role":"user","content":"hi"}]}`, modelRef(t))
+	body := userBody(t, 10, true, "hi")
 	rec := f.post(t, body)
 	require.Equal(t, http.StatusOK, rec.Code, "stream should start")
 
@@ -173,7 +197,7 @@ func TestProxyRelaysUpstreamError(t *testing.T) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		io.WriteString(w, `{"error":{"message":"rate limited upstream","type":"rate_limit"}}`)
 	})
-	body := fmt.Sprintf(`{"model":%q,"max_tokens":10,"messages":[{"role":"user","content":"hi"}]}`, modelRef(t))
+	body := userBody(t, 10, false, "hi")
 	rec := f.post(t, body)
 
 	assert.Equal(t, http.StatusTooManyRequests, rec.Code, "upstream status should be preserved")

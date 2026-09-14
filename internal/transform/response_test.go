@@ -176,7 +176,7 @@ func TestOpenAIToAnthropicCacheAccounting(t *testing.T) {
 			},
 		},
 		Usage: &wire.OAUsage{
-			PromptTokens:     250, // includes 100 cached
+			PromptTokens:     250, // the cached count below is part of this total
 			CompletionTokens: 50,
 			PromptTokensDetails: &wire.OAPromptTokensDetails{
 				CachedTokens:     cached,
@@ -200,7 +200,6 @@ func TestOpenAIToAnthropicCacheAccounting(t *testing.T) {
 	assert.Equal(t, 50, *result.Usage.CacheCreationInputTokens, "cache_creation_input_tokens should match written count")
 }
 
-// TestOpenAIToAnthropicNoCacheAccounting verifies zero cache values don't add nil pointers.
 func TestOpenAIToAnthropicNoCacheAccounting(t *testing.T) {
 	resp := &wire.OAResponse{
 		ID: "test",
@@ -395,7 +394,6 @@ func TestStreamOpenAIToAnthropicCacheAccountingStreaming(t *testing.T) {
 
 	output := dst.String()
 
-	// Cache accounting in message_delta (input = 250 - 100 cached = 150).
 	assert.Contains(t, output, `"input_tokens":150`, "input_tokens should exclude cached tokens")
 	assert.Contains(t, output, `"cache_read_input_tokens":100`, "cache_read_input_tokens should be set")
 	assert.Contains(t, output, `"cache_creation_input_tokens":50`, "cache_creation_input_tokens should be set")

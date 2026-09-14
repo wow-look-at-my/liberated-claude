@@ -17,26 +17,21 @@ const (
 	// authCodeTTL bounds how long an issued code stays redeemable.
 	authCodeTTL = 5 * time.Minute
 	// deviceCodeTTL bounds how long a device grant may be polled for.
-	deviceCodeTTL = 10 * time.Minute
-	// deviceGrantType is the RFC 8628 grant identifier.
+	deviceCodeTTL   = 10 * time.Minute
 	deviceGrantType = "urn:ietf:params:oauth:grant-type:device_code"
 )
 
-// authCode is one outstanding authorization code awaiting its token exchange.
 type authCode struct {
 	challenge   string
 	redirectURI string
 	expires     time.Time
 }
 
-// deviceGrant is one outstanding device code awaiting its first poll.
 type deviceGrant struct {
 	userCode string
 	expires  time.Time
 }
 
-// codeStore holds codes between the call that issues one and the token call
-// that redeems it.
 type codeStore struct {
 	mu      sync.Mutex
 	codes   map[string]authCode
@@ -86,7 +81,6 @@ func (c *codeStore) put(code string, v authCode) {
 	c.codes[code] = v
 }
 
-// take returns a code and removes it, so a code is redeemable exactly once.
 func (c *codeStore) take(code string) (authCode, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -98,9 +92,6 @@ func (c *codeStore) take(code string) (authCode, bool) {
 	return v, true
 }
 
-// handleAuthServerMetadata answers the RFC 8414 probe Claude Desktop makes when
-// inferenceGatewayOidc is unset, which is the gateway-as-authorization-server
-// path. Returning 404 here leaves the sign-in screen with nowhere to go.
 func (s *Server) handleAuthServerMetadata(w http.ResponseWriter, r *http.Request) {
 	base := requestOrigin(r)
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -118,11 +109,6 @@ func (s *Server) handleAuthServerMetadata(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// handleDeviceAuthorization starts an RFC 8628 device grant.
-//
-// The grant is approved the moment it is issued. There is no second party to
-// consent: the gateway's credential is the static API key it already published
-// to this client, so the verification page confirms rather than authorizes.
 func (s *Server) handleDeviceAuthorization(w http.ResponseWriter, r *http.Request) {
 	deviceCode, err := randomToken()
 	if err != nil {
@@ -261,8 +247,6 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	s.writeToken(w)
 }
 
-// completeDeviceGrant answers a device-code poll. An unknown code is reported
-// with the OAuth error body the poller expects, not an Anthropic-shaped one.
 func (s *Server) completeDeviceGrant(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.codes.takeDevice(r.PostFormValue("device_code")); !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
@@ -306,9 +290,6 @@ func randomUserCode() (string, error) {
 	return string(out), nil
 }
 
-// requestOrigin echoes back the origin the client dialled. The app requires the
-// metadata to be same-origin with inferenceGatewayBaseUrl, and localhost and
-// 127.0.0.1 are different origins.
 func requestOrigin(r *http.Request) string {
 	scheme := "http"
 	if r.TLS != nil {
@@ -336,7 +317,6 @@ func verifierMatches(verifier, challenge string) bool {
 	return subtle.ConstantTimeCompare([]byte(want), []byte(challenge)) == 1
 }
 
-// randomToken returns a URL-safe 256-bit value.
 func randomToken() (string, error) {
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {

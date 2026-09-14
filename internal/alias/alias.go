@@ -1,21 +1,14 @@
 // Package alias produces model IDs that Claude Desktop will accept.
 //
-// Desktop screens every model ID it discovers. The screen is reproduced here
-// verbatim from the shipped app so the IDs this gateway advertises are known to
-// pass rather than guessed at:
+// Desktop screens every model ID it discovers. Accepts below reproduces that
+// screen from the shipped app so the IDs this gateway advertises are known to
+// pass rather than guessed at: the app lowercases the ID, rejects it outright
+// when a token belonging to a non-Anthropic model matches, and otherwise admits
+// it when it is a bare tier alias or contains an Anthropic-flavored substring.
 //
-//	function lo(e) {
-//	  let t = e.toLowerCase();
-//	  return uge.test(t) ? !1 : co.test(t) || lge.some((e) => t.includes(e));
-//	}
-//
-// uge is a list of tokens belonging to non-Anthropic models; a match rejects the
-// ID outright. co matches a bare tier alias. lge is a list of Anthropic-flavored
-// substrings, any one of which admits the ID.
-//
-// The upshot is that a real upstream ID such as "deepseek-v3" or "z-ai/glm-4.6"
-// can never be advertised as-is: "deepseek" and "glm" are both rejection tokens.
-// Encode turns such an ID into one that passes, and Decode is its inverse.
+// The upshot is that a real upstream ID containing "deepseek" or "glm" can never
+// be advertised as-is, since both are rejection tokens. Encode turns such an ID
+// into an accepted form, and Decode is its inverse.
 package alias
 
 import (

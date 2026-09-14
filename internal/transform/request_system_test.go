@@ -11,9 +11,6 @@ import (
 	"github.com/wow-look-at-my/liberated-claude/internal/wire"
 )
 
-// Claude Desktop puts system turns in the messages array, not only in the
-// top-level system field. Rejecting that role failed every real chat with
-// `400 unknown message role: "system"`.
 func TestAnthropicToOpenAI_SystemRoleInMessages(t *testing.T) {
 	m := &config.Model{ID: "glm-5.3-flash", ContextWindow: 1048576}
 

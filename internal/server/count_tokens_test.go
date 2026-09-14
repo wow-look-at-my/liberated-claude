@@ -84,8 +84,6 @@ func TestFallbackUsesTheRealTokenizer(t *testing.T) {
 	tok, err := bpe()
 	require.NoError(t, err)
 
-	// cl100k_base splits this into exactly two tokens, so a count that merely
-	// scaled the byte length would not land here.
 	n, err := tok.CountTokens("Hello World")
 	require.NoError(t, err)
 	require.Equal(t, 2, n)
@@ -96,8 +94,6 @@ func TestFallbackUsesTheRealTokenizer(t *testing.T) {
 	total, err := countInputTokens(req)
 	require.NoError(t, err)
 
-	// The turn's content is JSON-quoted, so it costs its own tokens plus the
-	// quotes, plus the per-message framing.
 	quoted, err := tok.CountTokens(`"Hello World"`)
 	require.NoError(t, err)
 	require.Equal(t, quoted+perMessageOverhead, total)

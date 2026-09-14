@@ -23,8 +23,6 @@ import (
 
 const testKey = "test-key"
 
-// testConfigXML holds one model above the 1M threshold and one below, so the
-// discovery assertions can tell the two apart.
 const testConfigXML = `<?xml version="1.0" encoding="UTF-8"?>
 <liberatedClaude>
 	<server>
@@ -97,9 +95,6 @@ func decodeDoc(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 	return doc
 }
 
-// Discovery runs before the client holds a credential, so these paths answer
-// without one. openid-configuration stays absent: that document belongs to an
-// external IdP configured through inferenceGatewayOidc, a different sign-in path.
 func TestDiscoveryProbesNeedNoCredential(t *testing.T) {
 	h := newTestServer(t)
 	for path, want := range map[string]int{
@@ -112,9 +107,6 @@ func TestDiscoveryProbesNeedNoCredential(t *testing.T) {
 	}
 }
 
-// Claude Desktop refuses metadata whose issuer or endpoints are not same-origin
-// with inferenceGatewayBaseUrl, and localhost and 127.0.0.1 are different
-// origins, so the document has to echo the host the client dialled.
 func TestAuthServerMetadataIsSameOriginAsTheRequest(t *testing.T) {
 	h := newTestServer(t)
 	for _, host := range []string{"localhost:8787", "127.0.0.1:8787"} {
@@ -310,8 +302,6 @@ func TestModelsRequiresKey(t *testing.T) {
 		do(t, h, http.MethodGet, "/v1/models", testKey).Code, "correct key should pass")
 }
 
-// The reason this program exists: a model's real window reaches Claude Desktop
-// instead of being clamped to Anthropic's 200000.
 func TestModelsAdvertiseRealContextWindow(t *testing.T) {
 	rec := do(t, newTestServer(t), http.MethodGet, "/v1/models", testKey)
 	require.Equal(t, http.StatusOK, rec.Code, "discovery should succeed")

@@ -1,5 +1,3 @@
-// Package server implements the three HTTP endpoints Claude Desktop needs:
-// the bootstrap config overlay, model discovery, and the Messages API itself.
 package server
 
 import (
@@ -54,12 +52,6 @@ func New(cfg *config.Config, client *http.Client, log *slog.Logger) *Server {
 	}
 }
 
-// acquire waits for a slot on the provider's gate and returns the release. It
-// bounds how many calls this gateway has in flight at once, because Claude
-// Desktop opens dozens at a time while warming sessions and a provider that
-// limits by concurrency answers the excess with 429 rather than queueing.
-//
-// A provider with no configured limit gets a no-op release.
 func (s *Server) acquire(ctx context.Context, p *config.Provider) (func(), error) {
 	gate, limited := s.gates[p.Name]
 	if !limited {
@@ -110,9 +102,6 @@ func (s *Server) Handler() http.Handler {
 	return s.logRequests(s.authenticate(mux))
 }
 
-// logRequests records every request with the status it got. Without this a
-// path no route matches is answered by the mux with a bare 404 that no handler
-// ever sees, so a client failure leaves no trace anywhere in this process.
 func (s *Server) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}

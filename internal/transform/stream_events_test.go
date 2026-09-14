@@ -56,8 +56,6 @@ func TestStreamEventsAreSelfDescribing(t *testing.T) {
 		"message_delta", "message_stop",
 	}, types)
 
-	// A stop event has to name the block it closes, and the indices have to
-	// pair with the starts.
 	require.EqualValues(t, 0, events[1]["index"])
 	require.EqualValues(t, 0, events[3]["index"])
 	require.EqualValues(t, 1, events[4]["index"])

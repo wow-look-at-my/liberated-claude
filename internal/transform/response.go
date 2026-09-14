@@ -32,7 +32,6 @@ func OpenAIToAnthropic(resp *wire.OAResponse, advertisedModel string) (*wire.Mes
 	msg := choice.Message
 	content := respContentBlocks(msg)
 
-	// Build the response ID: use the upstream ID if present, else synthesize one.
 	id := resp.ID
 	if id == "" {
 		id = "msg_" + strconv.FormatInt(int64(resp.Created), 36)
@@ -60,7 +59,6 @@ func OpenAIToAnthropic(resp *wire.OAResponse, advertisedModel string) (*wire.Mes
 func respContentBlocks(msg *wire.OAMessage) []wire.ContentBlock {
 	var blocks []wire.ContentBlock
 
-	// Emit thinking block first if the model reasoned.
 	if reasoning := msg.ReasoningText(); reasoning != "" {
 		blocks = append(blocks, wire.ContentBlock{
 			Type:     "thinking",
@@ -202,8 +200,6 @@ func StreamOpenAIToAnthropic(dst io.Writer, src io.Reader, advertisedModel strin
 	// Content block indices are sequential across the message.
 	nextIndex := 0
 
-	// message_start precedes the first upstream chunk, so the upstream ID is not
-	// known yet and one is synthesized. An empty id fails client validation.
 	messageID = "msg_" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	if err := streamEmit(dst, "message_start", map[string]interface{}{
 		"type": "message_start",
@@ -358,7 +354,6 @@ func StreamOpenAIToAnthropic(dst io.Writer, src io.Reader, advertisedModel strin
 				toolCall.Arguments += tc.Function.Arguments
 			}
 
-			// Emit content_block_start on first chunk for this tool call.
 			if !toolCall.started {
 				if currentBlock != nil {
 					if err := streamBlockStop(dst, currentBlock.index); err != nil {
@@ -464,9 +459,6 @@ func StreamOpenAIToAnthropic(dst io.Writer, src io.Reader, advertisedModel strin
 	return nil
 }
 
-// streamBlockStop closes the content block at index. A client dispatches on
-// the payload's type and matches the block by index, so an event carrying
-// neither leaves the block open and the message never finishes.
 func streamBlockStop(dst io.Writer, index int) error {
 	return streamEmit(dst, "content_block_stop", map[string]interface{}{
 		"type":  "content_block_stop",

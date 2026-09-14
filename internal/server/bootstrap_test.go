@@ -58,10 +58,6 @@ func TestBootstrapAdvertisesAPublicGateway(t *testing.T) {
 	assert.Equal(t, "x-api-key", doc["inferenceGatewayAuthScheme"], "the scheme should say how to send the key")
 }
 
-// inferenceGatewayBaseUrl is origin-pinned: the app drops it, and the credential
-// it carries, unless its origin is exactly the one the document was fetched
-// from. Naming the request's own origin keeps the two equal for a gateway that
-// answers to more than one name.
 func TestBootstrapGatewayURLFollowsTheRequestOrigin(t *testing.T) {
 	h := newTestServer(t)
 	for _, host := range []string{"gateway.example.com:8787", "gateway.localtest.me:8787"} {

@@ -116,14 +116,21 @@ func TestAnthropicToOpenAI_ToolResultWithImage(t *testing.T) {
 			Text: "Screenshot captured.",
 		},
 	}
-	resultJSON, _ := json.Marshal(resultContent)
+	resultJSON, err := json.Marshal(resultContent)
+	assert.NoError(t, err, "tool_result payload should marshal")
+	userContent, err := json.Marshal([]wire.ContentBlock{{
+		Type:      "tool_result",
+		ToolUseID: "tool_123",
+		Content:   resultJSON,
+	}})
+	assert.NoError(t, err, "tool_result block should marshal")
 
 	req := &wire.MessagesRequest{
 		Model: "claude-3-5-sonnet-20241022",
 		Messages: []wire.Message{
 			{
 				Role:    "user",
-				Content: json.RawMessage([]byte(`[{"type":"tool_result","tool_use_id":"tool_123","content":` + string(resultJSON) + `}]`)),
+				Content: userContent,
 			},
 		},
 		MaxTokens: 1024,

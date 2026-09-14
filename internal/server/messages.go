@@ -103,9 +103,6 @@ var retryBackoff = []time.Duration{
 	3 * time.Second,
 }
 
-// sendUpstream issues req, retrying while the provider reports it is throttled.
-// The gate above bounds this gateway's own concurrency, but a provider account
-// is shared, so a 429 can still arrive from work started elsewhere.
 func (s *Server) sendUpstream(req *http.Request) (*http.Response, error) {
 	for attempt := 0; ; attempt++ {
 		resp, err := s.client.Do(req)
@@ -117,7 +114,6 @@ func (s *Server) sendUpstream(req *http.Request) (*http.Response, error) {
 			"status", resp.StatusCode, "attempt", attempt+1, "wait", wait)
 		resp.Body.Close()
 
-		// A replayable body is required to send the same request twice.
 		if req.GetBody == nil {
 			return resp, fmt.Errorf("upstream returned %d and the request cannot be replayed", resp.StatusCode)
 		}
@@ -156,7 +152,6 @@ func (s *Server) proxyOpenAI(
 ) {
 	oaReq, err := transform.AnthropicToOpenAI(req, m)
 	if err != nil {
-		// Our own 400, so relayUpstreamError never sees it.
 		s.log.Error("request translation failed", "model", m.ID, "error", err)
 		writeError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
@@ -195,7 +190,6 @@ func (s *Server) proxyOpenAI(
 	s.completeOpenAI(w, resp, advertised)
 }
 
-// streamOpenAI converts an OpenAI SSE stream into an Anthropic one.
 func (s *Server) streamOpenAI(w http.ResponseWriter, resp *http.Response, advertised string) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -207,7 +201,6 @@ func (s *Server) streamOpenAI(w http.ResponseWriter, resp *http.Response, advert
 	}
 }
 
-// completeOpenAI converts a single OpenAI reply into an Anthropic one.
 func (s *Server) completeOpenAI(w http.ResponseWriter, resp *http.Response, advertised string) {
 	var oaResp wire.OAResponse
 	if err := json.NewDecoder(resp.Body).Decode(&oaResp); err != nil {

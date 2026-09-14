@@ -10,9 +10,6 @@ import (
 	"github.com/wow-look-at-my/liberated-claude/internal/wire"
 )
 
-// TestControlBytesSurviveAsValidJSON guards the 500 that Go's %q verb caused:
-// it escapes a control byte as \x1b, and JSON defines no \x escape, so the
-// request body was rejected by the encoder before it ever left the process.
 func TestControlBytesSurviveAsValidJSON(t *testing.T) {
 	// Terminal output reaches a tool result with escape sequences intact.
 	nasty := "\x1b[31mred\x1b[0m\x00\x07 tab\there"

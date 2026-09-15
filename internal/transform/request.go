@@ -10,6 +10,12 @@ import (
 )
 
 // AnthropicToOpenAI translates an Anthropic Messages request to OpenAI Chat Completions format.
+//
+// Upstream accepts the system role at index 0 and answers anything later with
+// "System message must be at the beginning". So every leading system source
+// merges into one message, and a system turn that arrives mid-conversation
+// rides as a user turn: hoisting it would move the instruction off the turn it
+// governs and re-key the cached prefix on every request.
 func AnthropicToOpenAI(req *wire.MessagesRequest, m *config.Model) (*wire.OARequest, error) {
 	out := &wire.OARequest{
 		Model:       m.ID,
@@ -38,22 +44,42 @@ func AnthropicToOpenAI(req *wire.MessagesRequest, m *config.Model) (*wire.OARequ
 		out.StreamOptions = &wire.OAStreamOptions{IncludeUsage: true}
 	}
 
-	// System prompt as leading message.
+	var leading []string
 	if len(req.System) > 0 {
 		systemText, err := reqSystemText(req.System, m.EffectiveCache())
 		if err != nil {
 			return nil, err
 		}
 		if systemText != "" {
-			out.Messages = append(out.Messages, wire.OAMessage{
-				Role:    "system",
-				Content: jsonString(systemText),
-			})
+			leading = append(leading, systemText)
 		}
+	}
+	for _, msg := range req.Messages {
+		if msg.Role != "system" {
+			break
+		}
+		text, err := reqSystemText(msg.Content, m.EffectiveCache())
+		if err != nil {
+			return nil, err
+		}
+		if text != "" {
+			leading = append(leading, text)
+		}
+	}
+	if len(leading) > 0 {
+		out.Messages = append(out.Messages, wire.OAMessage{
+			Role:    "system",
+			Content: jsonString(strings.Join(leading, "\n\n")),
+		})
 	}
 
 	// Messages.
+	started := false
 	for _, msg := range req.Messages {
+		if !started && msg.Role == "system" {
+			continue // already merged into the leading system message
+		}
+		started = true
 		if msg.Role == "assistant" {
 			// Assistant messages may contain tool_use blocks, which become ToolCalls.
 			oamsg, err := reqAssistantMessage(msg, m)
@@ -69,14 +95,13 @@ func AnthropicToOpenAI(req *wire.MessagesRequest, m *config.Model) (*wire.OARequ
 			}
 			out.Messages = append(out.Messages, msgs...)
 		} else if msg.Role == "system" {
-			// Desktop sends system turns inline, not only as req.System.
 			text, err := reqSystemText(msg.Content, m.EffectiveCache())
 			if err != nil {
 				return nil, err
 			}
 			if text != "" {
 				out.Messages = append(out.Messages, wire.OAMessage{
-					Role:    "system",
+					Role:    "user",
 					Content: jsonString(text),
 				})
 			}
